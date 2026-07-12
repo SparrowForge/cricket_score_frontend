@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -9,6 +9,7 @@ import { usePermissions } from '@/lib/permissions';
 import { MatchListItem, Org, Player, SquadMember, Team, Tournament, Venue } from '@/lib/types';
 import { Confirm, Empty, ErrorBox, IconButton, Modal, Spinner, StatusBadge, Tabs } from '@/components/ui';
 import { UploadButton } from '@/components/upload';
+import { Combobox } from '@/components/combobox';
 import { BillingPanel } from '@/components/admin/billing-panel';
 import { RolesPanel } from '@/components/admin/roles-panel';
 import { NewsPanel } from '@/components/admin/news-panel';
@@ -277,10 +278,18 @@ function TeamSquad({ teamId, orgId, canManage, onChange }: {
       )}
       {canManage && (
         <div className="flex gap-2">
-          <select className="input" value={addId} onChange={(e) => setAddId(e.target.value)}>
-            <option value="">Add a player…</option>
-            {available.map((p) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-          </select>
+          <div className="flex-1">
+            <Combobox
+              placeholder="Search a player to add…"
+              value={addId}
+              onChange={setAddId}
+              emptyLabel="No matching players in the org roster"
+              options={available.map((p) => ({
+                value: p.id, label: p.full_name,
+                sublabel: p.primary_role?.replace(/_/g, ' '),
+              }))}
+            />
+          </div>
           <button className="btn-ghost" disabled={busy || !addId} onClick={add}>Add</button>
         </div>
       )}
@@ -393,7 +402,9 @@ function PlayerEditModal({ player, onSaved, onClose }: { player: Player; onSaved
   const [form, setForm] = useState({
     full_name: player.full_name, primary_role: player.primary_role,
     batting_style: player.batting_style ?? '', bowling_style: player.bowling_style ?? '',
-    country: player.country ?? '',
+    country: player.country ?? '', date_of_birth: player.date_of_birth ?? '',
+    height_cm: player.height_cm?.toString() ?? '', major_teams: (player.major_teams ?? []).join(', '),
+    bio: player.bio ?? '',
   });
   const [photo, setPhoto] = useState<string | null>(player.photo_url);
   const [busy, setBusy] = useState(false);
@@ -407,7 +418,11 @@ function PlayerEditModal({ player, onSaved, onClose }: { player: Player; onSaved
         body: {
           full_name: form.full_name, primary_role: form.primary_role,
           batting_style: form.batting_style || undefined, bowling_style: form.bowling_style || undefined,
-          country: form.country || undefined, ...(photo ? { photo_url: photo } : {}),
+          country: form.country || undefined, date_of_birth: form.date_of_birth || undefined,
+          height_cm: form.height_cm ? Number(form.height_cm) : undefined,
+          major_teams: form.major_teams ? form.major_teams.split(',').map((t) => t.trim()).filter(Boolean) : undefined,
+          bio: form.bio || undefined,
+          ...(photo ? { photo_url: photo } : {}),
         },
       });
       onSaved();
@@ -416,7 +431,7 @@ function PlayerEditModal({ player, onSaved, onClose }: { player: Player; onSaved
 
   return (
     <Modal title="Edit player profile" onClose={onClose}>
-      <div className="space-y-3">
+      <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
         <div><label className="label">Full name</label>
           <input className="input" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></div>
         <div className="grid grid-cols-2 gap-3">
@@ -432,7 +447,16 @@ function PlayerEditModal({ player, onSaved, onClose }: { player: Player; onSaved
             </select></div>
           <div><label className="label">Bowling</label>
             <input className="input" placeholder="e.g. right_arm_fast" value={form.bowling_style} onChange={(e) => setForm({ ...form, bowling_style: e.target.value })} /></div>
+          <div><label className="label">Date of birth</label>
+            <input className="input" type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} /></div>
+          <div><label className="label">Height (cm)</label>
+            <input className="input" type="number" min={80} max={230} value={form.height_cm} onChange={(e) => setForm({ ...form, height_cm: e.target.value })} /></div>
         </div>
+        <div><label className="label">Major teams (comma-separated)</label>
+          <input className="input" placeholder="e.g. Bangladesh U19, Dhaka Metro" value={form.major_teams}
+            onChange={(e) => setForm({ ...form, major_teams: e.target.value })} /></div>
+        <div><label className="label">Bio</label>
+          <textarea className="input min-h-20" value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></div>
         <div className="flex items-center gap-3">
           <UploadButton label={photo ? 'Replace photo' : 'Photo'} folder="players" onUploaded={(a) => setPhoto(a.cdn_url)} />
           {photo && (
@@ -658,38 +682,126 @@ function TournamentsPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
   );
 }
 
-/* ================= Matches (unchanged) ================= */
+/* ================= Matches ================= */
+const localNow = () => {
+  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+  return d.toISOString().slice(0, 16);
+};
+
 function MatchesPanel({ orgId }: { orgId: string }) {
   const { data: matches, loading, reload } = useApi<MatchListItem[]>(`/matches?org=${orgId}`);
   const { data: teams } = useApi<Team[]>(`/orgs/${orgId}/teams`);
+  const { data: formats } = useApi<{ id: string; name: string; slug: string; is_builtin: boolean; rules: { overs_per_innings: number | null } }[]>('/formats');
+  const { data: venues } = useApi<Venue[]>(`/orgs/${orgId}/venues`);
   const [teamA, setTeamA] = useState('');
   const [teamB, setTeamB] = useState('');
+  const [venueId, setVenueId] = useState('');
+  const [scheduledAt, setScheduledAt] = useState(localNow());
+  const [formatId, setFormatId] = useState('');
+  const [showRules, setShowRules] = useState(false);
+  const [overs, setOvers] = useState('');
+  const [maxOversPerBowler, setMaxOversPerBowler] = useState('');
+  const [freeHit, setFreeHit] = useState(true);
+  const [dls, setDls] = useState(true);
   const [error, setError] = useState<{ message?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Default the select to T20 once formats load, so the visible selection
+  // always matches what will actually be submitted (an empty formatId with
+  // an unselected-but-required-looking <select> would otherwise silently
+  // fall back to T20 while the browser displays a different option as chosen).
+  useEffect(() => {
+    if (!formatId && formats?.length) {
+      setFormatId(formats.find((f) => f.slug === 't20' && f.is_builtin)?.id ?? formats[0].id);
+    }
+  }, [formatId, formats]);
+
+  const selectedFormat = formats?.find((f) => f.id === formatId);
 
   const create = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(null);
+    e.preventDefault(); setError(null); setBusy(true);
     try {
-      await api(`/orgs/${orgId}/matches`, { method: 'POST', body: { team_a_id: teamA, team_b_id: teamB, scheduled_start: new Date().toISOString() } });
+      const rule_overrides: Record<string, unknown> = {};
+      if (overs) rule_overrides.overs_per_innings = Number(overs);
+      if (maxOversPerBowler) rule_overrides.max_overs_per_bowler = Number(maxOversPerBowler);
+      if (showRules) {
+        rule_overrides.no_ball = { runs: 1, free_hit: freeHit };
+        rule_overrides.dls = { enabled: dls };
+      }
+      await api(`/orgs/${orgId}/matches`, {
+        method: 'POST',
+        body: {
+          team_a_id: teamA, team_b_id: teamB,
+          venue_id: venueId || undefined,
+          scheduled_start: new Date(scheduledAt).toISOString(),
+          format_id: selectedFormat?.id,
+          ...(Object.keys(rule_overrides).length ? { rule_overrides } : {}),
+        },
+      });
+      setOvers(''); setMaxOversPerBowler(''); setVenueId(''); setScheduledAt(localNow());
       await reload();
     } catch (err) { setError(err as { message?: string }); }
+    finally { setBusy(false); }
   };
 
   if (loading) return <Spinner />;
   return (
     <div className="space-y-4">
-      <form onSubmit={create} className="card flex flex-wrap items-end gap-3 p-4">
-        <div><label className="label">Team A</label>
-          <select className="input" value={teamA} onChange={(e) => setTeamA(e.target.value)} required>
-            <option value="">Select…</option>
-            {teams?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select></div>
-        <div><label className="label">Team B</label>
-          <select className="input" value={teamB} onChange={(e) => setTeamB(e.target.value)} required>
-            <option value="">Select…</option>
-            {teams?.filter((t) => t.id !== teamA).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select></div>
-        <button className="btn-primary">Schedule friendly (now)</button>
-        <ErrorBox error={error} />
+      <form onSubmit={create} className="card space-y-3 p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div><label className="label">Team A</label>
+            <select className="input" value={teamA} onChange={(e) => setTeamA(e.target.value)} required>
+              <option value="">Select…</option>
+              {teams?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select></div>
+          <div><label className="label">Team B</label>
+            <select className="input" value={teamB} onChange={(e) => setTeamB(e.target.value)} required>
+              <option value="">Select…</option>
+              {teams?.filter((t) => t.id !== teamA).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select></div>
+          <div><label className="label">Venue</label>
+            <select className="input" value={venueId} onChange={(e) => setVenueId(e.target.value)}>
+              <option value="">Not set</option>
+              {venues?.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select></div>
+          <div><label className="label">Start</label>
+            <input className="input" type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 border-t border-line/40 pt-3">
+          <div><label className="label">Format</label>
+            <select className="input" value={formatId} onChange={(e) => setFormatId(e.target.value)}>
+              {formats?.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select></div>
+          <div className="w-28"><label className="label">Overs / innings</label>
+            <input className="input" type="number" min={1} max={90}
+              placeholder={selectedFormat?.rules.overs_per_innings?.toString() ?? 'unlimited'}
+              value={overs} onChange={(e) => setOvers(e.target.value)} /></div>
+          <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => setShowRules(!showRules)}>
+            {showRules ? '− Fewer rules' : '+ More match rules'}
+          </button>
+        </div>
+
+        {showRules && (
+          <div className="flex flex-wrap items-end gap-4 border-t border-line/40 pt-3">
+            <div className="w-32"><label className="label">Max overs / bowler</label>
+              <input className="input" type="number" min={1} placeholder="default" value={maxOversPerBowler}
+                onChange={(e) => setMaxOversPerBowler(e.target.value)} /></div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={freeHit} onChange={(e) => setFreeHit(e.target.checked)} />
+              Free hit after no-ball
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={dls} onChange={(e) => setDls(e.target.checked)} />
+              DLS for rain interruptions
+            </label>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 border-t border-line/40 pt-3">
+          <button className="btn-primary" disabled={busy}>{busy ? 'Scheduling…' : 'Schedule match'}</button>
+          <ErrorBox error={error} />
+        </div>
       </form>
       {!matches?.length ? <Empty>No matches yet — schedule one or generate tournament fixtures.</Empty> : (
         <div className="card divide-y divide-line/40 p-0">

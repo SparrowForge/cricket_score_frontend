@@ -97,12 +97,46 @@ export interface Player {
   id: string; full_name: string; display_name?: string | null; primary_role: string;
   batting_style: string | null; bowling_style: string | null; photo_url: string | null;
   country?: string | null; date_of_birth?: string | null;
+  height_cm?: number | null; major_teams?: string[]; bio?: string | null;
+}
+
+export interface PlayerCareerStat {
+  format_family: string; matches_played: number;
+  innings_batted: number; runs_scored: number; balls_faced: number; not_outs: number;
+  highest_score: number; fifties: number; hundreds: number; fours: number; sixes: number;
+  innings_bowled: number; balls_bowled: number; runs_conceded: number; wickets_taken: number;
+  best_bowling: { wickets: number; runs: number } | null; five_wkt_hauls: number;
+  catches: number; stumpings: number; run_outs: number;
+}
+
+export interface PlayerProfile extends Player {
+  career_stats: PlayerCareerStat[];
+  recent_matches: {
+    match_id: string; runs_scored: number; balls_faced: number;
+    wickets_taken: number; runs_conceded: number; scheduled_start: string; result_summary: string | null;
+  }[];
+  teams: { id: string; name: string; short_name: string; logo_url: string | null }[];
 }
 
 export interface Venue {
   id: string; name: string; city: string | null; country: string | null;
   capacity: number | null; image_url: string | null; organization_id: string | null;
 }
+
+export const calcAge = (dob: string): number => {
+  const d = new Date(dob);
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  if (now.getMonth() < d.getMonth() || (now.getMonth() === d.getMonth() && now.getDate() < d.getDate())) age--;
+  return age;
+};
+
+export const fmtHeight = (cm: number): string => {
+  const totalInches = Math.round(cm / 2.54);
+  const feet = Math.floor(totalInches / 12);
+  const inches = totalInches % 12;
+  return `${cm} cm (${feet}'${inches}")`;
+};
 
 export const oversFromBalls = (balls: number, bpo = 6) => `${Math.floor(balls / bpo)}.${balls % bpo}`;
 

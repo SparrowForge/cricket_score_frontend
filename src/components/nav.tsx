@@ -9,6 +9,7 @@ const links = [
   { href: '/', label: 'Home', exact: true },
   { href: '/matches', label: 'Live Scores' },
   { href: '/tournaments', label: 'Tournaments' },
+  { href: '/players', label: 'Players' },
   { href: '/news', label: 'News' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/admin', label: 'Manage', authed: true },

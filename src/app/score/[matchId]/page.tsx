@@ -89,6 +89,11 @@ export default function ScorerConsolePage() {
   const status = state.status ?? match.status;
   const needsNewBatter = !!state.pending_new_batter;
   const followOn = state.follow_on_available;
+  // Defensive: a match can occasionally land on status 'live' with no engine
+  // yet (e.g. an innings was reopened after having zero balls scored, so no
+  // striker/bowler could be recovered). Treat that exactly like "openers not
+  // set yet" instead of showing a run pad that will just error.
+  const needsOpeners = (status === 'toss' || status === 'innings_break' || (status === 'live' && !state.engine)) && !followOn;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -133,8 +138,13 @@ export default function ScorerConsolePage() {
         </div>
       )}
 
-      {(status === 'toss' || status === 'innings_break') && !followOn && (
+      {needsOpeners && (
         <>
+          {status === 'live' && (
+            <div className="rounded-lg bg-gold/10 px-3 py-2 text-xs font-semibold text-gold">
+              This innings needs a striker, non-striker and bowler before scoring can continue.
+            </div>
+          )}
           <OpenersForm batting={battingPool} bowling={bowlingPool} busy={busy}
             onStart={(striker, nonStriker, bowler) =>
               call(async () => {
@@ -155,7 +165,7 @@ export default function ScorerConsolePage() {
         </>
       )}
 
-      {status === 'live' && !needsNewBatter && (
+      {status === 'live' && !needsNewBatter && state.engine && (
         <>
           <BowlerBar state={state} bowling={bowlingPool} nextBowler={nextBowler} onPick={setNextBowler} />
           <div className="card p-4">
