@@ -1,5 +1,7 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
-export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:3001';
+// Strip trailing slashes so `${API_URL}/path` and `${WS_URL}/live` never double up.
+const stripSlash = (u: string) => u.replace(/\/+$/, '');
+export const API_URL = stripSlash(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1');
+export const WS_URL = stripSlash(process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:3001');
 
 export class ApiError extends Error {
   status: number;

@@ -72,3 +72,38 @@ export function Modal({ title, onClose, children }: {
     </div>
   );
 }
+
+/** Destructive-action confirmation dialog. */
+export function Confirm({ title, message, confirmLabel = 'Delete', danger = true, busy, error, onConfirm, onClose }: {
+  title: string; message: React.ReactNode; confirmLabel?: string; danger?: boolean;
+  busy?: boolean; error?: { message?: string } | null; onConfirm: () => void; onClose: () => void;
+}) {
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="text-sm text-mut">{message}</div>
+        <ErrorBox error={error ?? null} />
+        <div className="flex gap-2">
+          <button className={`${danger ? 'btn-danger' : 'btn-primary'} flex-1`} disabled={busy} onClick={onConfirm}>
+            {busy ? 'Working…' : confirmLabel}
+          </button>
+          <button className="btn-ghost flex-1" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Small pencil/trash icon button for inline row actions. */
+export function IconButton({ title, onClick, variant = 'ghost', children }: {
+  title: string; onClick: () => void; variant?: 'ghost' | 'danger'; children: React.ReactNode;
+}) {
+  return (
+    <button title={title} onClick={onClick}
+      className={`rounded-md px-2 py-1 text-xs font-semibold ${
+        variant === 'danger' ? 'text-cherry hover:bg-cherry/10' : 'text-mut hover:bg-panel-2 hover:text-ink'
+      }`}>
+      {children}
+    </button>
+  );
+}

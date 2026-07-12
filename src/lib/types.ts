@@ -78,18 +78,30 @@ export interface PointsRow {
 
 export interface Org {
   id: string; name: string; slug: string; logo_url: string | null;
-  is_owner: boolean; plan: string | null;
+  is_owner: boolean; plan: string | null; owner_user_id?: string;
+}
+
+export interface SquadMember {
+  id: string; full_name: string; primary_role: string;
+  jersey_number: number | null; is_captain: boolean; is_wicket_keeper: boolean;
 }
 
 export interface Team {
   id: string; name: string; short_name: string; slug: string; logo_url: string | null;
+  primary_color?: string | null; home_venue_id?: string | null;
   squad_size?: number;
-  squad?: { id: string; full_name: string; primary_role: string; jersey_number: number | null }[];
+  squad?: SquadMember[];
 }
 
 export interface Player {
-  id: string; full_name: string; primary_role: string;
+  id: string; full_name: string; display_name?: string | null; primary_role: string;
   batting_style: string | null; bowling_style: string | null; photo_url: string | null;
+  country?: string | null; date_of_birth?: string | null;
+}
+
+export interface Venue {
+  id: string; name: string; city: string | null; country: string | null;
+  capacity: number | null; image_url: string | null; organization_id: string | null;
 }
 
 export const oversFromBalls = (balls: number, bpo = 6) => `${Math.floor(balls / bpo)}.${balls % bpo}`;
