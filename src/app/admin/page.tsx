@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth';
 import { Org } from '@/lib/types';
-import { Empty, ErrorBox, Spinner } from '@/components/ui';
+import { Confirm, Empty, ErrorBox, IconButton, Modal, Spinner } from '@/components/ui';
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 
@@ -18,6 +18,29 @@ export default function AdminPage() {
   const [name, setName] = useState('');
   const [error, setError] = useState<{ message?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Org | null>(null);
+  const [deleting, setDeleting] = useState<Org | null>(null);
+  const [rowError, setRowError] = useState<{ message?: string } | null>(null);
+
+  const saveEdit = async (name: string) => {
+    setBusy(true); setRowError(null);
+    try {
+      await api(`/orgs/${editing!.id}`, { method: 'PATCH', body: { name } });
+      setEditing(null);
+      await reload();
+    } catch (err) { setRowError(err as { message?: string }); }
+    finally { setBusy(false); }
+  };
+
+  const confirmDelete = async () => {
+    setBusy(true); setRowError(null);
+    try {
+      await api(`/orgs/${deleting!.id}`, { method: 'DELETE' });
+      setDeleting(null);
+      await reload();
+    } catch (err) { setRowError(err as { message?: string }); }
+    finally { setBusy(false); }
+  };
 
   if (authLoading) return <Spinner />;
   if (!user) { router.push('/login'); return <Spinner />; }
@@ -48,13 +71,21 @@ export default function AdminPage() {
       {loading ? <Spinner /> : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {orgs?.map((o) => (
-            <Link key={o.id} href={`/admin/${o.id}`} className="card block p-4 hover:border-grass/50">
-              <div className="flex items-center justify-between">
-                <h2 className="font-bold">{o.name}</h2>
+            <div key={o.id} className="card p-4 transition-colors hover:border-grass/50">
+              <div className="flex items-center justify-between gap-2">
+                <Link href={`/admin/${o.id}`} className="font-bold hover:text-grass">{o.name}</Link>
                 {o.plan && <span className="rounded-full bg-panel-2 px-2 py-0.5 text-[10px] font-bold uppercase text-mut">{o.plan}</span>}
               </div>
-              <p className="mt-1 text-xs text-mut">{o.is_owner ? 'Owner' : 'Member'} · /{o.slug}</p>
-            </Link>
+              <div className="mt-1 flex items-center justify-between">
+                <p className="text-xs text-mut">{o.is_owner ? 'Owner' : 'Member'} · /{o.slug}</p>
+                {o.is_owner && (
+                  <div className="flex gap-1">
+                    <IconButton title="Edit organization" onClick={() => { setEditing(o); setRowError(null); }}>✏️ Edit</IconButton>
+                    <IconButton title="Delete organization" variant="danger" onClick={() => { setDeleting(o); setRowError(null); }}>🗑</IconButton>
+                  </div>
+                )}
+              </div>
+            </div>
           ))}
           <form onSubmit={createOrg} className="card flex flex-col gap-3 border-dashed p-4">
             <div className="text-xs font-bold uppercase tracking-wide text-mut">New organization</div>
@@ -65,6 +96,39 @@ export default function AdminPage() {
         </div>
       )}
       {!loading && !orgs?.length && <Empty>Create your first organization to start running tournaments.</Empty>}
+
+      {editing && (
+        <OrgEditModal org={editing} busy={busy} error={rowError} onSave={saveEdit} onClose={() => setEditing(null)} />
+      )}
+      {deleting && (
+        <Confirm
+          title={`Delete “${deleting.name}”?`}
+          message="This hides the organization and everything in it. In-progress matches must be finished first. This cannot be undone from the UI."
+          confirmLabel="Delete organization"
+          busy={busy} error={rowError}
+          onConfirm={confirmDelete} onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function OrgEditModal({ org, busy, error, onSave, onClose }: {
+  org: Org; busy: boolean; error: { message?: string } | null;
+  onSave: (name: string) => void; onClose: () => void;
+}) {
+  const [name, setName] = useState(org.name);
+  return (
+    <Modal title="Edit organization" onClose={onClose}>
+      <div className="space-y-3">
+        <div><label className="label">Name</label>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <ErrorBox error={error} />
+        <div className="flex gap-2">
+          <button className="btn-primary flex-1" disabled={busy || !name.trim()} onClick={() => onSave(name)}>Save</button>
+          <button className="btn-ghost flex-1" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
