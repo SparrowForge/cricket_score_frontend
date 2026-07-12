@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-pitch: #0b1120;        /* page background */
+  --color-panel: #131c2e;        /* cards */
+  --color-panel-2: #1a2540;      /* raised cards / inputs */
+  --color-line: #24304d;         /* borders */
+  --color-grass: #22c55e;        /* primary accent */
+  --color-grass-dark: #15803d;
+  --color-gold: #fbbf24;         /* highlights (sixes, MVP) */
+  --color-cherry: #ef4444;       /* wickets, live dot */
+  --color-ink: #e2e8f0;          /* main text */
+  --color-mut: #8b9cbe;          /* muted text */
+}
+
+html { background: var(--color-pitch); }
+body { color: var(--color-ink); font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
+
+@layer components {
+  .card { @apply bg-panel border border-line rounded-xl; }
+  .btn-primary, .btn-ghost, .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-40 disabled:pointer-events-none cursor-pointer;
+  }
+  .btn-primary { @apply bg-grass text-black hover:bg-grass-dark hover:text-white; }
+  .btn-ghost { @apply border border-line text-ink hover:bg-panel-2; }
+  .btn-danger { @apply bg-cherry/90 text-white hover:bg-cherry; }
+  .input { @apply w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink placeholder:text-mut focus:outline-none focus:border-grass; }
+  .label { @apply block text-xs font-semibold text-mut uppercase tracking-wide mb-1; }
+  .tab { @apply px-3 py-2 text-sm font-semibold whitespace-nowrap border-b-2 border-transparent text-mut hover:text-ink cursor-pointer; }
+  .tab-active { @apply text-grass border-grass; }
+  .ball-chip { @apply inline-flex items-center justify-center min-w-7 h-7 px-1 rounded-full text-xs font-bold border border-line bg-panel-2; }
+  .ball-chip-w { @apply bg-cherry text-white border-cherry; }
+  .ball-chip-4 { @apply bg-grass text-black border-grass; }
+  .ball-chip-6 { @apply bg-gold text-black border-gold; }
+}
+
+.score-digits { font-variant-numeric: tabular-nums; }
+
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: var(--color-cherry); animation: pulse-dot 1.4s infinite; }
