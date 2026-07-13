@@ -11,6 +11,11 @@ import { MatchDetail, SquadPlayer, Team, oversFromBalls } from '@/lib/types';
 import { BallChip, ErrorBox, Modal, Spinner, StatusBadge } from '@/components/ui';
 
 type ExtraMode = null | 'wide' | 'no_ball' | 'bye' | 'leg_bye';
+// A no-ball can ALSO have byes/leg-byes run off it — the no-ball penalty
+// stays a no-ball, the extra runs are scored (and charged) as byes/leg-byes,
+// never lumped into the no-ball or dropped. Off by default (no_ball runs
+// are off the bat unless the scorer flags this).
+type NoBallByes = null | 'bye' | 'leg_bye';
 interface Pick { id: string; name: string }
 
 export default function ScorerConsolePage() {
@@ -26,6 +31,7 @@ export default function ScorerConsolePage() {
   const [error, setError] = useState<{ message?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [extraMode, setExtraMode] = useState<ExtraMode>(null);
+  const [nbByes, setNbByes] = useState<NoBallByes>(null);
   const [wicketOpen, setWicketOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
   const [nextBowler, setNextBowler] = useState<string | null>(null);
@@ -73,11 +79,15 @@ export default function ScorerConsolePage() {
       });
       if (res.state) setState({ ...res.state, status: res.state.status ?? 'live', seq: res.seq } as LiveState);
       setExtraMode(null);
+      setNbByes(null);
       setNextBowler(null);
     });
 
   const scoreRuns = (runs: number) => {
     if (extraMode === 'wide') return postBall({ extra_type: 'wide', runs_extras: runs });
+    if (extraMode === 'no_ball' && nbByes) {
+      return postBall({ extra_type: 'no_ball', runs_extras: runs, secondary_extra_type: nbByes });
+    }
     if (extraMode === 'no_ball') return postBall({ extra_type: 'no_ball', runs_batter: runs });
     if (extraMode === 'bye') return postBall({ extra_type: 'bye', runs_extras: runs });
     if (extraMode === 'leg_bye') return postBall({ extra_type: 'leg_bye', runs_extras: runs });
@@ -174,13 +184,24 @@ export default function ScorerConsolePage() {
             )}
             <div className="mb-3 flex gap-2">
               {(['wide', 'no_ball', 'bye', 'leg_bye'] as const).map((m) => (
-                <button key={m} onClick={() => setExtraMode(extraMode === m ? null : m)}
+                <button key={m} onClick={() => { setExtraMode(extraMode === m ? null : m); setNbByes(null); }}
                   className={`flex-1 rounded-lg border px-2 py-2 text-xs font-bold uppercase ${
                     extraMode === m ? 'border-gold bg-gold/15 text-gold' : 'border-line text-mut hover:text-ink'}`}>
                   {m === 'wide' ? 'WD' : m === 'no_ball' ? 'NB' : m === 'bye' ? 'BYE' : 'LB'}
                 </button>
               ))}
             </div>
+            {extraMode === 'no_ball' && (
+              <div className="mb-3 flex gap-2">
+                {(['bye', 'leg_bye'] as const).map((m) => (
+                  <button key={m} onClick={() => setNbByes(nbByes === m ? null : m)}
+                    className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-bold uppercase ${
+                      nbByes === m ? 'border-gold bg-gold/15 text-gold' : 'border-line text-mut hover:text-ink'}`}>
+                    + {m === 'bye' ? 'Bye' : 'Leg Bye'}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2">
               {[0, 1, 2, 3, 4, 6].map((r) => (
                 <button key={r} onClick={() => scoreRuns(r)} disabled={busy}
@@ -194,7 +215,11 @@ export default function ScorerConsolePage() {
             </div>
             {extraMode && (
               <p className="mt-2 text-center text-xs text-gold">
-                {extraMode.replace('_', ' ').toUpperCase()} selected — tap runs {extraMode === 'no_ball' ? 'off the bat' : 'completed'} (0 for none)
+                {extraMode.replace('_', ' ').toUpperCase()} selected — tap runs {
+                  extraMode === 'no_ball'
+                    ? (nbByes ? `run as ${nbByes === 'bye' ? 'byes' : 'leg byes'} (plus the no-ball)` : 'off the bat')
+                    : 'completed'
+                } (0 for none)
               </p>
             )}
             <div className="mt-3 grid grid-cols-2 gap-2">

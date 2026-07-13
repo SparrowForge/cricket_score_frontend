@@ -120,7 +120,7 @@ function InningsStrip({ innings }: { innings: InningsRow[] }) {
 interface ScorecardInnings extends InningsRow {
   batting_short: string; bowling_short: string;
   batting: { id: string; full_name: string; balls: number; runs: number; fours: number; sixes: number; is_out: boolean; dismissal: string | null }[];
-  bowling: { id: string; full_name: string; legal_balls: number; runs_conceded: number; wickets: number }[];
+  bowling: { id: string; full_name: string; legal_balls: number; maidens: number; runs_conceded: number; wickets: number }[];
   fall_of_wickets: { over_number: number; ball_in_over: number; batter: string; wicket_type: string; wicket_number: number; score_at: number }[];
 }
 
@@ -179,6 +179,7 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
               <thead>
                 <tr className="text-left text-xs uppercase text-mut">
                   <th className="px-4 py-2">Bowler</th><th className="px-2 py-2 text-right">O</th>
+                  <th className="px-2 py-2 text-right">M</th>
                   <th className="px-2 py-2 text-right">R</th><th className="px-2 py-2 text-right">W</th>
                   <th className="px-4 py-2 text-right">Econ</th>
                 </tr>
@@ -188,6 +189,7 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
                   <tr key={b.id} className="border-t border-line/40">
                     <td className="px-4 py-2 font-semibold">{b.full_name}</td>
                     <td className="score-digits px-2 py-2 text-right text-mut">{oversFromBalls(b.legal_balls)}</td>
+                    <td className="score-digits px-2 py-2 text-right text-mut">{b.maidens}</td>
                     <td className="score-digits px-2 py-2 text-right text-mut">{b.runs_conceded}</td>
                     <td className="score-digits px-2 py-2 text-right font-bold text-cherry">{b.wickets}</td>
                     <td className="score-digits px-4 py-2 text-right text-mut">{b.legal_balls ? ((b.runs_conceded * 6) / b.legal_balls).toFixed(2) : '—'}</td>
@@ -247,10 +249,17 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
     <div className="space-y-3">
       {entries.map((c) => {
         if (c.body.startsWith('End of over')) {
+          const isWicketMaiden = c.body.includes('WICKET MAIDEN!');
+          const isMaiden = isWicketMaiden || c.body.includes('Maiden over!');
           return (
-            <div key={c.id} className="card border-line bg-panel-2/60 p-4">
+            <div key={c.id} className={`card p-4 ${isWicketMaiden ? 'border-cherry/50 bg-cherry/5' : isMaiden ? 'border-grass/50 bg-grass/5' : 'border-line bg-panel-2/60'}`}>
               <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-mut">
                 Over summary
+                {isMaiden && (
+                  <span className={`rounded px-1.5 py-0.5 font-black ${isWicketMaiden ? 'bg-cherry/15 text-cherry' : 'bg-grass/15 text-grass'}`}>
+                    {isWicketMaiden ? 'WICKET MAIDEN' : 'MAIDEN'}
+                  </span>
+                )}
                 <span className="ml-auto normal-case font-normal">{new Date(c.created_at).toLocaleTimeString()}</span>
               </div>
               <p className="text-sm font-semibold">{c.body}</p>

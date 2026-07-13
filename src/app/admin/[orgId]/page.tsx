@@ -709,6 +709,8 @@ function MatchesPanel({ orgId }: { orgId: string }) {
   const { data: teams } = useApi<Team[]>(`/orgs/${orgId}/teams`);
   const { data: formats } = useApi<{ id: string; name: string; slug: string; is_builtin: boolean; rules: { overs_per_innings: number | null } }[]>('/formats');
   const { data: venues } = useApi<Venue[]>(`/orgs/${orgId}/venues`);
+  const { data: tournaments } = useApi<Tournament[]>(`/tournaments?org=${orgId}`);
+  const [tournamentId, setTournamentId] = useState('');
   const [teamA, setTeamA] = useState('');
   const [teamB, setTeamB] = useState('');
   const [venueId, setVenueId] = useState('');
@@ -747,6 +749,7 @@ function MatchesPanel({ orgId }: { orgId: string }) {
       await api(`/orgs/${orgId}/matches`, {
         method: 'POST',
         body: {
+          tournament_id: tournamentId,
           team_a_id: teamA, team_b_id: teamB,
           venue_id: venueId || undefined,
           scheduled_start: new Date(scheduledAt).toISOString(),
@@ -765,6 +768,11 @@ function MatchesPanel({ orgId }: { orgId: string }) {
     <div className="space-y-4">
       <form onSubmit={create} className="card space-y-3 p-4">
         <div className="flex flex-wrap items-end gap-3">
+          <div><label className="label">Tournament</label>
+            <select className="input" value={tournamentId} onChange={(e) => setTournamentId(e.target.value)} required>
+              <option value="">Select…</option>
+              {tournaments?.map((t) => <option key={t.id} value={t.id}>{t.name}{t.season ? ` (${t.season})` : ''}</option>)}
+            </select></div>
           <div><label className="label">Team A</label>
             <select className="input" value={teamA} onChange={(e) => setTeamA(e.target.value)} required>
               <option value="">Select…</option>
@@ -816,6 +824,9 @@ function MatchesPanel({ orgId }: { orgId: string }) {
 
         <div className="flex items-center gap-3 border-t border-line/40 pt-3">
           <button className="btn-primary" disabled={busy}>{busy ? 'Scheduling…' : 'Schedule match'}</button>
+          {tournaments && tournaments.length === 0 && (
+            <span className="text-xs text-gold">Every match belongs to a tournament — create one in the Tournaments tab first.</span>
+          )}
           <ErrorBox error={error} />
         </div>
       </form>
