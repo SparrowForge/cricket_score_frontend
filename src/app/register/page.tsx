@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { ErrorBox } from '@/components/ui';
+import { GoogleDivider, GoogleSignInButton } from '@/components/google-signin';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -49,6 +50,8 @@ export default function RegisterPage() {
           <ErrorBox error={error} />
           <button className="btn-primary w-full" disabled={busy}>{busy ? 'Creating…' : 'Create account'}</button>
         </form>
+        <GoogleDivider />
+        <GoogleSignInButton onError={(m) => setError({ message: m })} />
         <p className="mt-4 text-center text-sm text-mut">
           Already registered? <Link href="/login" className="text-grass hover:underline">Sign in</Link>
         </p>

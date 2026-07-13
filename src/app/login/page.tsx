@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { ErrorBox, Modal } from '@/components/ui';
+import { GoogleDivider, GoogleSignInButton } from '@/components/google-signin';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -46,6 +47,8 @@ export default function LoginPage() {
           <ErrorBox error={error} />
           <button className="btn-primary w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         </form>
+        <GoogleDivider />
+        <GoogleSignInButton onError={(m) => setError({ message: m })} />
         <p className="mt-3 text-center text-sm">
           <button type="button" onClick={() => setForgotOpen(true)} className="text-grass hover:underline">
             Forgot password?
