@@ -49,6 +49,11 @@ export default function MatchCenterPage() {
           </p>
         )}
         {match.result_summary && <p className="mt-1 text-sm font-bold text-grass">{match.result_summary}</p>}
+        {match.player_of_match_name && (
+          <p className="mt-1 text-xs text-mut">
+            Player of the Match: <span className="font-bold text-gold">{match.player_of_match_name}</span>
+          </p>
+        )}
         {match.child_matches?.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
             {match.child_matches.map((c) => (

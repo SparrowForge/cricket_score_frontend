@@ -1,9 +1,14 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { LiveState } from '@/lib/useLive';
 import { InningsRow, MatchDetail, SquadPlayer, oversFromBalls } from '@/lib/types';
 import { BallChip, Empty, Spinner } from '@/components/ui';
+import {
+  ChartLegend, OverComparisonChart, PlayerRunsChart, TeamFilter, WormChart, WormSeries, teamColorMap,
+} from '@/components/match/charts';
 
 // ============ Summary (live) ============
 export function SummaryTab({ state, match }: { state: LiveState | null; match: MatchDetail }) {
@@ -198,15 +203,49 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
 }
 
 // ============ Commentary ============
+interface CommentaryEntry {
+  id: string; body: string; is_highlight: boolean; author: string | null;
+  created_at: string; over_number: number | null; ball_in_over: number | null;
+}
+const COMMENTARY_PAGE = 200; // backend caps limit at 200
+
 export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }) {
-  const { data, loading } = useApi<{ id: string; body: string; is_highlight: boolean; author: string | null; created_at: string; over_number: number | null; ball_in_over: number | null }[]>(
-    `/matches/${matchId}/commentary`, [seq],
+  const { data, loading } = useApi<CommentaryEntry[]>(
+    `/matches/${matchId}/commentary?limit=${COMMENTARY_PAGE}`, [seq],
   );
-  if (loading) return <Spinner />;
-  if (!data?.length) return <Empty>No commentary yet.</Empty>;
+  const [older, setOlder] = useState<CommentaryEntry[]>([]);
+  const [exhausted, setExhausted] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
+  // Newest page + previously loaded older pages, deduped (pages can overlap
+  // when new balls arrive between fetches).
+  const entries = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(data ?? []), ...older].filter((c) => !seen.has(c.id) && !!seen.add(c.id));
+  }, [data, older]);
+
+  if (loading && entries.length === 0) return <Spinner />;
+  if (!entries.length) return <Empty>No commentary yet.</Empty>;
+
+  const hasMore = !exhausted && (older.length > 0 ? true : (data?.length ?? 0) === COMMENTARY_PAGE);
+
+  const loadOlder = async () => {
+    const oldest = entries[entries.length - 1];
+    setLoadingOlder(true);
+    try {
+      const more = await api<CommentaryEntry[]>(
+        `/matches/${matchId}/commentary?limit=${COMMENTARY_PAGE}&before=${encodeURIComponent(oldest.created_at)}`,
+      );
+      setOlder((o) => [...o, ...more]);
+      if (more.length < COMMENTARY_PAGE) setExhausted(true);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      {data.map((c) => (
+      {entries.map((c) => (
         <div key={c.id} className={`card p-4 ${c.is_highlight ? 'border-gold/50' : ''}`}>
           <div className="mb-1 flex items-center gap-2 text-xs text-mut">
             {c.over_number != null && <span className="font-bold text-ink">{c.over_number}.{c.ball_in_over}</span>}
@@ -216,6 +255,11 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
           <p className="text-sm">{c.body}</p>
         </div>
       ))}
+      {hasMore && (
+        <button onClick={loadOlder} disabled={loadingOlder} className="btn-ghost w-full !py-2 text-xs">
+          {loadingOlder ? 'Loading…' : 'Load older commentary'}
+        </button>
+      )}
     </div>
   );
 }
@@ -235,20 +279,47 @@ export function OversTab({ matchId, seq }: { matchId: string; seq: number }) {
   }, {});
   const max = Math.max(...data.map((o) => o.runs), 12);
 
+  // Over comparison: one bar group per over, one bar per innings.
+  const teamsInOrder = [...new Set(data.map((o) => o.batting_team))];
+  const colors = teamColorMap(teamsInOrder);
+  const inningsKeys = Object.keys(byInnings);
+  const teamBatsTwice = inningsKeys.length > teamsInOrder.length;
+  const seriesLabel = (overs: typeof data) =>
+    teamBatsTwice ? `${overs[0].batting_team} (inn ${overs[0].innings})` : overs[0].batting_team;
+  const maxOverNo = Math.max(...data.map((o) => o.over_number));
+  const comparisonRows = Array.from({ length: maxOverNo + 1 }, (_, over) => ({
+    over,
+    values: inningsKeys.flatMap((key) => {
+      const o = byInnings[key].find((r) => r.over_number === over);
+      return o ? [{ name: seriesLabel(byInnings[key]), color: colors[o.batting_team], runs: o.runs, wickets: o.wickets }] : [];
+    }),
+  }));
+
   return (
     <div className="space-y-6">
+      {inningsKeys.length > 1 && (
+        <div className="card p-4">
+          <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Over comparison — runs per over</div>
+          <OverComparisonChart rows={comparisonRows} />
+          <ChartLegend items={[
+            ...inningsKeys.map((key) => ({ label: seriesLabel(byInnings[key]), color: colors[byInnings[key][0].batting_team] })),
+            { label: 'Wicket', color: 'var(--color-cherry)' },
+          ]} />
+        </div>
+      )}
       {Object.entries(byInnings).map(([key, overs]) => (
         <div key={key} className="card p-4">
           <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">
             {overs[0].batting_team} — runs per over
           </div>
-          <div className="flex h-40 items-end gap-1">
+          <div className="flex items-end gap-1">
             {overs.map((o) => (
-              <div key={o.over_number} className="group relative flex flex-1 flex-col items-center gap-1">
+              <div key={o.over_number} className="group relative flex flex-1 flex-col items-center justify-end gap-1">
                 <span className="text-[10px] font-bold text-mut opacity-0 group-hover:opacity-100">{o.runs}</span>
+                {/* px height: a % here resolves against the auto-height column and collapses to 0 */}
                 <div
-                  className={`w-full rounded-t ${o.wickets > 0 ? 'bg-cherry' : 'bg-grass'}`}
-                  style={{ height: `${Math.max((o.runs / max) * 100, 3)}%` }}
+                  className={`w-full max-w-6 rounded-t ${o.wickets > 0 ? 'bg-cherry' : 'bg-grass'}`}
+                  style={{ height: `${Math.max((o.runs / max) * 120, 4)}px` }}
                   title={`Over ${o.over_number + 1}: ${o.runs} runs, ${o.wickets} wkt (${o.bowler}) — ${o.cumulative_runs} total`}
                 />
                 <span className="text-[10px] text-mut">{o.over_number + 1}</span>
@@ -262,19 +333,95 @@ export function OversTab({ matchId, seq }: { matchId: string; seq: number }) {
   );
 }
 
-// ============ Stats (wagon wheel + partnerships) ============
+// ============ Stats (graphs + wagon wheel + partnerships) ============
 export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
   const { data, loading } = useApi<{
     wagon_wheel: { batter: string; wagon: { angle_deg: number; distance_pct: number }; runs_batter: number; is_boundary_four: boolean; is_boundary_six: boolean; innings: number }[];
     partnerships: { innings: number; batting_team: string; batters: string[]; runs: number; balls: number; wicket_number: number; unbeaten: boolean }[];
+    run_rate: { innings: number; batting_team: string; over_number: number; runs: number; wickets: number; cumulative_runs: number; cumulative_wickets: number }[];
+    batting: { player_id: string; full_name: string; innings: number; team: string; runs: number; balls: number }[];
   }>(`/matches/${matchId}/stats`, [seq]);
+  const [teamSel, setTeamSel] = useState('all');
   if (loading) return <Spinner />;
   const wagon = data?.wagon_wheel ?? [];
   const partnerships = data?.partnerships ?? [];
+  const runRate = data?.run_rate ?? [];
+  const batting = data?.batting ?? [];
   const maxP = Math.max(...partnerships.map((p) => p.runs), 1);
 
+  // Team → color, stable by first-batting order; filter never repaints survivors.
+  const teamsInOrder = [...new Set(runRate.map((r) => r.batting_team))];
+  const colors = teamColorMap(teamsInOrder);
+  const wantTeam = (team: string) => teamSel === 'all' || teamSel === team;
+
+  // Worm series per innings (a team may bat twice in multi-innings formats)
+  const byInnings = runRate.reduce<Record<string, typeof runRate>>((acc, r) => {
+    ((acc[`${r.innings}-${r.batting_team}`] ??= []) as typeof runRate).push(r);
+    return acc;
+  }, {});
+  const teamBatsTwice = Object.keys(byInnings).length > teamsInOrder.length;
+  const wormSeries: WormSeries[] = Object.values(byInnings)
+    .filter((rows) => wantTeam(rows[0].batting_team))
+    .map((rows) => ({
+      name: teamBatsTwice ? `${rows[0].batting_team} (inn ${rows[0].innings})` : rows[0].batting_team,
+      color: colors[rows[0].batting_team],
+      points: [{ x: 0, y: 0 }, ...rows.map((r) => ({ x: r.over_number + 1, y: r.cumulative_runs, wickets: r.wickets }))],
+    }));
+  const rrSeries: WormSeries[] = Object.values(byInnings)
+    .filter((rows) => wantTeam(rows[0].batting_team))
+    .map((rows) => ({
+      name: teamBatsTwice ? `${rows[0].batting_team} (inn ${rows[0].innings})` : rows[0].batting_team,
+      color: colors[rows[0].batting_team],
+      points: rows.map((r) => ({
+        x: r.over_number + 1,
+        y: +(r.cumulative_runs / (r.over_number + 1)).toFixed(2),
+        wickets: r.wickets,
+      })),
+    }));
+
+  // Player runs, aggregated across innings, highest first
+  const playerRuns = Object.values(
+    batting.filter((b) => wantTeam(b.team)).reduce<Record<string, { name: string; team: string; runs: number; balls: number }>>((acc, b) => {
+      const key = `${b.team}-${b.player_id}`;
+      acc[key] ??= { name: b.full_name, team: b.team, runs: 0, balls: 0 };
+      acc[key].runs += b.runs;
+      acc[key].balls += b.balls;
+      return acc;
+    }, {}),
+  ).sort((a, b) => b.runs - a.runs);
+
+  const legendItems = teamsInOrder.filter(wantTeam).map((t) => ({ label: t, color: colors[t] }));
+
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="space-y-6">
+      {runRate.length > 0 && (
+        <>
+          {teamsInOrder.length > 1 && <TeamFilter teams={teamsInOrder} value={teamSel} onChange={setTeamSel} />}
+
+          {playerRuns.length > 0 && (
+            <div className="card p-4">
+              <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Batter runs</div>
+              <PlayerRunsChart rows={playerRuns} colors={colors} />
+              {legendItems.length > 1 && <ChartLegend items={legendItems} />}
+            </div>
+          )}
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="card p-4">
+              <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Worm — total runs by over</div>
+              <WormChart series={wormSeries} />
+              <ChartLegend items={[...legendItems, { label: 'Wicket', color: 'var(--color-cherry)' }]} />
+            </div>
+            <div className="card p-4">
+              <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Run rate by over</div>
+              <WormChart series={rrSeries} yFmt={(v) => v.toFixed(1)} />
+              <ChartLegend items={[...legendItems, { label: 'Wicket', color: 'var(--color-cherry)' }]} />
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
       <div className="card p-4">
         <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Wagon wheel</div>
         {wagon.length === 0 ? (
@@ -325,6 +472,7 @@ export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

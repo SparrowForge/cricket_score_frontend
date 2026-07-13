@@ -33,6 +33,7 @@ export interface MatchDetail {
   team_a_id: string; team_a_name: string; team_a_short: string; team_a_logo: string | null;
   team_b_id: string; team_b_name: string; team_b_short: string; team_b_logo: string | null;
   player_of_match_id: string | null;
+  player_of_match_name: string | null;
   rules_snapshot: Record<string, unknown> | null;
   innings: InningsRow[];
   child_matches: { id: string; stage_label: string; status: string; result_summary: string | null }[];
