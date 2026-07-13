@@ -5,7 +5,11 @@ import { BlockRenderer, CmsBlock } from '@/components/blocks';
 import { LiveScorePanel } from '@/components/live-panel';
 import { Spinner } from '@/components/ui';
 
-interface CmsPage { slug: string; title: string; blocks: CmsBlock[] }
+interface CmsPage {
+  slug: string;
+  title: string;
+  blocks: CmsBlock[];
+}
 
 /**
  * Marketing home: CMS-driven blocks with the live score panel pinned
@@ -14,8 +18,13 @@ interface CmsPage { slug: string; title: string; blocks: CmsBlock[] }
 export default function HomePage() {
   const { data: page, loading } = useApi<CmsPage>('/cms/pages/home');
 
-  if (loading) return <Spinner label="Loading…" />;
-  const blocks = page?.blocks ?? [];
+  if (loading) return <Spinner label="Loading..." />;
+
+  const blocks = (page?.blocks ?? []).map((block) =>
+    block.type === 'pricing_table'
+      ? { ...block, props: { ...(block.props ?? {}), plan_slugs: undefined } }
+      : block,
+  );
   const [first, ...rest] = blocks;
 
   return (
