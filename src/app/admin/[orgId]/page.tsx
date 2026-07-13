@@ -329,6 +329,20 @@ const ROLES = [
   { value: 'all_rounder', label: 'All-rounder' }, { value: 'wicket_keeper', label: 'Wicket-keeper' },
   { value: 'wicket_keeper_batter', label: 'WK-Batter' },
 ];
+const BOWLING_STYLES = [
+  { value: '', label: '—' },
+  { value: 'right_arm_fast', label: 'Right-arm fast' },
+  { value: 'right_arm_fast_medium', label: 'Right-arm fast-medium' },
+  { value: 'right_arm_medium', label: 'Right-arm medium' },
+  { value: 'right_arm_off_break', label: 'Right-arm off break' },
+  { value: 'right_arm_leg_break', label: 'Right-arm leg break' },
+  { value: 'left_arm_fast', label: 'Left-arm fast' },
+  { value: 'left_arm_fast_medium', label: 'Left-arm fast-medium' },
+  { value: 'left_arm_medium', label: 'Left-arm medium' },
+  { value: 'left_arm_orthodox', label: 'Left-arm orthodox' },
+  { value: 'left_arm_chinaman', label: 'Left-arm chinaman' },
+  { value: 'none', label: 'None' },
+];
 
 function PlayersPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
   const { data: players, loading, reload } = useApi<Player[]>(`/orgs/${orgId}/players`);
@@ -446,7 +460,9 @@ function PlayerEditModal({ player, onSaved, onClose }: { player: Player; onSaved
               <option value="">—</option><option value="right_hand">Right hand</option><option value="left_hand">Left hand</option>
             </select></div>
           <div><label className="label">Bowling</label>
-            <input className="input" placeholder="e.g. right_arm_fast" value={form.bowling_style} onChange={(e) => setForm({ ...form, bowling_style: e.target.value })} /></div>
+            <select className="input" value={form.bowling_style} onChange={(e) => setForm({ ...form, bowling_style: e.target.value })}>
+              {BOWLING_STYLES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+            </select></div>
           <div><label className="label">Date of birth</label>
             <input className="input" type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} /></div>
           <div><label className="label">Height (cm)</label>

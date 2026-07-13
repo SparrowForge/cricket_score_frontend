@@ -245,16 +245,36 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
 
   return (
     <div className="space-y-3">
-      {entries.map((c) => (
-        <div key={c.id} className={`card p-4 ${c.is_highlight ? 'border-gold/50' : ''}`}>
-          <div className="mb-1 flex items-center gap-2 text-xs text-mut">
-            {c.over_number != null && <span className="font-bold text-ink">{c.over_number}.{c.ball_in_over}</span>}
-            {c.author && <span>{c.author}</span>}
-            <span className="ml-auto">{new Date(c.created_at).toLocaleTimeString()}</span>
+      {entries.map((c) => {
+        if (c.body.startsWith('End of over')) {
+          return (
+            <div key={c.id} className="card border-line bg-panel-2/60 p-4">
+              <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-mut">
+                Over summary
+                <span className="ml-auto normal-case font-normal">{new Date(c.created_at).toLocaleTimeString()}</span>
+              </div>
+              <p className="text-sm font-semibold">{c.body}</p>
+            </div>
+          );
+        }
+        const isWicket = /WICKET!/.test(c.body);
+        const isSix = /\bSIX!/.test(c.body);
+        const isFour = /\bFOUR!/.test(c.body);
+        const chip = isWicket ? 'W' : isSix ? '6' : isFour ? '4' : null;
+        const textColor = isWicket ? 'text-cherry' : isSix ? 'text-gold' : isFour ? 'text-grass' : '';
+        const border = isWicket ? 'border-cherry/50' : isSix ? 'border-gold/50' : isFour ? 'border-grass/50' : c.is_highlight ? 'border-gold/50' : '';
+        return (
+          <div key={c.id} className={`card p-4 ${border}`}>
+            <div className="mb-1 flex items-center gap-2 text-xs text-mut">
+              {c.over_number != null && <span className="font-bold text-ink">{c.over_number}.{c.ball_in_over}</span>}
+              {chip && <BallChip label={chip} />}
+              {c.author && <span>{c.author}</span>}
+              <span className="ml-auto">{new Date(c.created_at).toLocaleTimeString()}</span>
+            </div>
+            <p className={`text-sm ${textColor ? `${textColor} font-semibold` : ''}`}>{c.body}</p>
           </div>
-          <p className="text-sm">{c.body}</p>
-        </div>
-      ))}
+        );
+      })}
       {hasMore && (
         <button onClick={loadOlder} disabled={loadingOlder} className="btn-ghost w-full !py-2 text-xs">
           {loadingOlder ? 'Loading…' : 'Load older commentary'}
