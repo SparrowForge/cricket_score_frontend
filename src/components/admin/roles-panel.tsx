@@ -114,6 +114,12 @@ export function RolesPanel({ orgId }: { orgId: string }) {
       await reloadRoles();
     });
 
+  const removeMember = (memberId: string) =>
+    run(
+      () => api(`/orgs/${orgId}/members/${memberId}`, { method: 'DELETE' }),
+      () => { void reloadMembers(); void reloadAssignments(); },
+    );
+
   if (!roles || !catalog) return <Spinner />;
 
   return (
@@ -209,8 +215,12 @@ export function RolesPanel({ orgId }: { orgId: string }) {
               <div key={m.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
                 <span className="font-semibold">{m.full_name}</span>
                 <span className="text-xs text-mut">{m.email}</span>
-                <span className="ml-auto flex gap-1">
+                <span className="ml-auto flex items-center gap-2">
                   {m.org_roles.map((r) => <span key={r} className="rounded bg-panel-2 px-1.5 py-0.5 text-[10px] font-bold text-mut">{r}</span>)}
+                  <button className="text-xs text-cherry hover:underline"
+                    onClick={() => removeMember(m.id)}>
+                    remove
+                  </button>
                 </span>
               </div>
             ))}

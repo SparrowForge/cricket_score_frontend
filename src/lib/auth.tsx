@@ -15,7 +15,7 @@ interface AuthCtx {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, fullName: string) => Promise<void>;
+  register: (email: string, password: string, fullName: string, termsAccepted: boolean) => Promise<void>;
   loginWithGoogle: (idToken: string) => Promise<void>;
   logout: () => void;
 }
@@ -49,9 +49,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await loadMe();
   };
 
-  const register = async (email: string, password: string, fullName: string) => {
+  const register = async (email: string, password: string, fullName: string, termsAccepted: boolean) => {
+    if (!termsAccepted) {
+      throw new Error('You must accept the CricLive terms to create an account.');
+    }
     const res = await api<{ access_token: string }>('/auth/register', {
-      method: 'POST', body: { email, password, full_name: fullName },
+      method: 'POST', body: { email, password, full_name: fullName, terms_accepted: termsAccepted },
     });
     setToken(res.access_token);
     await loadMe();
