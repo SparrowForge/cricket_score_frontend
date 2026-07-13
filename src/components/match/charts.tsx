@@ -19,7 +19,9 @@ export function teamColorMap(teamsInOrder: string[]): Record<string, string> {
 /** Track the rendered width of a container so SVG charts stay crisp at any size. */
 function useMeasuredWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
-  const [width, setWidth] = useState(600);
+  // Start small: the first frame renders before the observer fires, and a
+  // too-wide default would overflow narrow (mobile) viewports.
+  const [width, setWidth] = useState(320);
   useEffect(() => {
     if (!ref.current) return;
     const ro = new ResizeObserver((entries) => {
@@ -100,8 +102,9 @@ export function WormChart({ series, height = 200, yFmt = (v: number) => String(M
   return (
     // The SVG is absolutely positioned so its fixed pixel width never inflates
     // the card — otherwise the ResizeObserver measures the inflated width and
-    // the chart can never shrink back (horizontal overflow on mobile).
-    <div ref={ref} className="relative w-full" style={{ height }}>
+    // the chart can never shrink back. overflow-hidden clips the pre-measure
+    // frame so it can't widen the page on mobile either.
+    <div ref={ref} className="relative w-full overflow-hidden" style={{ height }}>
       <svg className="absolute inset-0" width={width} height={height} onMouseMove={onMove} onMouseLeave={() => setHoverX(null)}>
         {yTicks.map((t) => (
           <g key={t}>
@@ -178,8 +181,9 @@ export function OverComparisonChart({ rows, height = 190 }: { rows: OverComparis
 
   return (
     // Absolute SVG for the same reason as WormChart: fixed pixel width must
-    // not feed back into the measured container width.
-    <div ref={ref} className="relative w-full" style={{ height }}>
+    // not feed back into the measured container width; overflow-hidden clips
+    // the pre-measure frame.
+    <div ref={ref} className="relative w-full overflow-hidden" style={{ height }}>
       <svg className="absolute inset-0" width={width} height={height} onMouseLeave={() => setHover(null)}>
         {[0, Math.ceil(maxRuns / 2), maxRuns].map((t) => (
           <g key={t}>

@@ -266,17 +266,26 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
             </div>
           );
         }
+        // Fielding events posted from the scorer console's quick buttons
+        const fieldingEvent = c.body.startsWith('DROPPED CATCH!') ? 'DROPPED CATCH'
+          : c.body.startsWith('RUN OUT MISSED!') ? 'RUN OUT MISSED'
+          : c.body.startsWith('MISFIELD!') ? 'MISFIELD' : null;
         const isWicket = /WICKET!/.test(c.body);
         const isSix = /\bSIX!/.test(c.body);
         const isFour = /\bFOUR!/.test(c.body);
         const chip = isWicket ? 'W' : isSix ? '6' : isFour ? '4' : null;
-        const textColor = isWicket ? 'text-cherry' : isSix ? 'text-gold' : isFour ? 'text-grass' : '';
-        const border = isWicket ? 'border-cherry/50' : isSix ? 'border-gold/50' : isFour ? 'border-grass/50' : c.is_highlight ? 'border-gold/50' : '';
+        const textColor = fieldingEvent ? 'text-gold' : isWicket ? 'text-cherry' : isSix ? 'text-gold' : isFour ? 'text-grass' : '';
+        const border = fieldingEvent ? 'border-gold/50' : isWicket ? 'border-cherry/50' : isSix ? 'border-gold/50' : isFour ? 'border-grass/50' : c.is_highlight ? 'border-gold/50' : '';
         return (
           <div key={c.id} className={`card p-4 ${border}`}>
             <div className="mb-1 flex items-center gap-2 text-xs text-mut">
               {c.over_number != null && <span className="font-bold text-ink">{c.over_number}.{c.ball_in_over}</span>}
-              {chip && <BallChip label={chip} />}
+              {fieldingEvent && (
+                <span className="rounded bg-gold/15 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-gold">
+                  {fieldingEvent}
+                </span>
+              )}
+              {!fieldingEvent && chip && <BallChip label={chip} />}
               {c.author && <span>{c.author}</span>}
               <span className="ml-auto">{new Date(c.created_at).toLocaleTimeString()}</span>
             </div>

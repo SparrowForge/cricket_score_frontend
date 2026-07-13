@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { Empty, ErrorBox, Spinner } from '@/components/ui';
@@ -17,6 +17,63 @@ interface Assignment {
 }
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+
+/**
+ * Email input with registered-user suggestions (debounced server search via
+ * GET /orgs/:orgId/user-search). Picking a suggestion fills the input.
+ */
+function MemberEmailInput({ orgId, value, onChange }: {
+  orgId: string; value: string; onChange: (email: string) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<{ id: string; email: string; full_name: string }[]>([]);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const picked = useRef(false);
+
+  useEffect(() => {
+    if (picked.current) { picked.current = false; return; }
+    const q = value.trim();
+    if (q.length < 2) { setSuggestions([]); setOpen(false); return; }
+    const t = setTimeout(async () => {
+      try {
+        const rows = await api<{ id: string; email: string; full_name: string }[]>(
+          `/orgs/${orgId}/user-search?q=${encodeURIComponent(q)}`,
+        );
+        setSuggestions(rows);
+        setOpen(rows.length > 0);
+      } catch { /* non-owners get 403 — quietly degrade to a plain input */ }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [value, orgId]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <input className="input" type="email" placeholder="scorer@club.com" value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => suggestions.length > 0 && setOpen(true)} />
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-line bg-panel shadow-xl">
+          {suggestions.map((u) => (
+            <button key={u.id} type="button"
+              onMouseDown={(e) => { e.preventDefault(); picked.current = true; onChange(u.email); setOpen(false); }}
+              className="flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-panel-2">
+              <span className="font-medium">{u.email}</span>
+              <span className="text-xs text-mut">{u.full_name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function RolesPanel({ orgId }: { orgId: string }) {
   const { data: catalog } = useApi<Permission[]>('/rbac/permissions');
@@ -133,7 +190,7 @@ export function RolesPanel({ orgId }: { orgId: string }) {
         <div className="mb-3 flex flex-wrap items-end gap-2">
           <div className="min-w-56 flex-1">
             <label className="label">Add member by email (must be registered)</label>
-            <input className="input" type="email" placeholder="scorer@club.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+            <MemberEmailInput orgId={orgId} value={inviteEmail} onChange={setInviteEmail} />
           </div>
           <select className="input max-w-40" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
             {['tournament_admin', 'scorer', 'commentator', 'viewer'].map((r) => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}

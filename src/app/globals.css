@@ -13,6 +13,21 @@
   --color-mut: #8b9cbe;          /* muted text */
 }
 
+/* Light theme: same accents, inverted surfaces. Utilities compile to
+   var(--color-*), so overriding the variables re-skins every component. */
+html[data-theme="light"] {
+  --color-pitch: #eef2f7;
+  --color-panel: #ffffff;
+  --color-panel-2: #e8edf5;
+  --color-line: #d3dce9;
+  --color-grass: #16a34a;
+  --color-grass-dark: #15803d;
+  --color-gold: #d97706;
+  --color-cherry: #dc2626;
+  --color-ink: #0f172a;
+  --color-mut: #5b6b85;
+}
+
 html { background: var(--color-pitch); }
 body { color: var(--color-ink); font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif; }
 

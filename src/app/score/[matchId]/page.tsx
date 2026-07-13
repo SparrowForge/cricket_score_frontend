@@ -18,6 +18,55 @@ type ExtraMode = null | 'wide' | 'no_ball' | 'bye' | 'leg_bye';
 type NoBallByes = null | 'bye' | 'leg_bye';
 interface Pick { id: string; name: string }
 
+/**
+ * Named field regions for one-tap shot placement. Angles feed the wagon-wheel
+ * chart (0° = straight down the ground, clockwise; right-hand batter's off
+ * side to the right); distance is a typical depth for the position.
+ */
+const FIELD_REGIONS = [
+  // --- OFF SIDE (Behind the Wicket) ---
+  { region: 'wicket_keeper',      label: 'Wicket Keeper',       angle: 180,  dist: 25 },
+  { region: 'first_slip',         label: 'First Slip',          angle: 170,  dist: 28 },
+  { region: 'second_slip',        label: 'Second Slip',         angle: 162,  dist: 29 },
+  { region: 'third_slip',         label: 'Third Slip',          angle: 154,  dist: 30 },
+  { region: 'fourth_slip',        label: 'Fourth Slip',         angle: 146,  dist: 31 },
+  { region: 'fly_slip',           label: 'Fly Slip',            angle: 160,  dist: 55 },
+  { region: 'third_man',          label: 'Third Man',           angle: 135,  dist: 85 },
+  { region: 'gully',              label: 'Gully',               angle: 120,  dist: 45 },
+
+  // --- OFF SIDE (In Front / Square of Wicket) ---
+  { region: 'silly_point',        label: 'Silly Point',         angle: 85,   dist: 12 },
+  { region: 'point',              label: 'Point',               angle: 90,   dist: 60 },
+  { region: 'deep_point',         label: 'Deep Point',          angle: 90,   dist: 90 },
+  { region: 'cover',              label: 'Cover',               angle: 55,   dist: 65 },
+  { region: 'deep_cover',         label: 'Deep Cover',          angle: 55,   dist: 90 },
+  { region: 'extra_cover',        label: 'Extra Cover',         angle: 35,   dist: 60 },
+  { region: 'deep_extra_cover',   label: 'Deep Extra Cover',    angle: 35,   dist: 90 },
+  { region: 'silly_mid_off',      label: 'Silly Mid-Off',       angle: 15,   dist: 12 },
+  { region: 'mid_off',            label: 'Mid Off',             angle: 25,   dist: 55 },
+  { region: 'long_off',           label: 'Long Off',            angle: 15,   dist: 90 },
+
+  // --- LEG SIDE / ON SIDE (In Front / Straight) ---
+  { region: 'silly_mid_on',       label: 'Silly Mid-On',        angle: -15,  dist: 12 },
+  { region: 'mid_on',             label: 'Mid On',              angle: -25,  dist: 55 },
+  { region: 'long_on',            label: 'Long On',             angle: -15,  dist: 90 },
+  { region: 'mid_wicket',         label: 'Mid Wicket',          angle: -55,  dist: 60 },
+  { region: 'deep_mid_wicket',    label: 'Deep Mid-Wicket',     angle: -55,  dist: 90 },
+
+  // --- LEG SIDE / ON SIDE (Square / Behind Wicket) ---
+  { region: 'forward_short_leg',  label: 'Forward Short Leg',   angle: -75,  dist: 12 },
+  { region: 'square_leg',         label: 'Square Leg',          angle: -90,  dist: 60 },
+  { region: 'deep_square_leg',    label: 'Deep Square Leg',     angle: -90,  dist: 90 },
+  { region: 'short_leg',          label: 'Short Leg',           angle: -115, dist: 12 },
+  { region: 'leg_gully',          label: 'Leg Gully',           angle: -130, dist: 35 },
+  { region: 'leg_slip',           label: 'Leg Slip',            angle: -165, dist: 25 },
+  { region: 'fine_leg',           label: 'Fine Leg',            angle: -145, dist: 80 },
+  { region: 'deep_fine_leg',      label: 'Deep Fine Leg',       angle: -145, dist: 95 },
+] as const;
+
+type FieldRegion = (typeof FIELD_REGIONS)[number]['region'];
+
+
 export default function ScorerConsolePage() {
   const { matchId } = useParams<{ matchId: string }>();
   const { user, loading: authLoading } = useAuth();
@@ -32,6 +81,7 @@ export default function ScorerConsolePage() {
   const [busy, setBusy] = useState(false);
   const [extraMode, setExtraMode] = useState<ExtraMode>(null);
   const [nbByes, setNbByes] = useState<NoBallByes>(null);
+  const [shotArea, setShotArea] = useState<FieldRegion | null>(null);
   const [wicketOpen, setWicketOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
   const [nextBowler, setNextBowler] = useState<string | null>(null);
@@ -68,18 +118,21 @@ export default function ScorerConsolePage() {
 
   const postBall = (payload: Record<string, unknown>) =>
     call(async () => {
+      const area = FIELD_REGIONS.find((r) => r.region === shotArea);
       const res = await api<{ seq: number; state: LiveState }>(`/matches/${matchId}/balls`, {
         method: 'POST',
         body: {
           client_event_id: uuid(),
           expected_seq: state?.seq,
           ...(nextBowler ? { bowler_id: nextBowler } : {}),
+          ...(area ? { wagon: { region: area.region, angle_deg: area.angle, distance_pct: area.dist } } : {}),
           ...payload,
         },
       });
       if (res.state) setState({ ...res.state, status: res.state.status ?? 'live', seq: res.seq } as LiveState);
       setExtraMode(null);
       setNbByes(null);
+      setShotArea(null);
       setNextBowler(null);
     });
 
@@ -222,6 +275,20 @@ export default function ScorerConsolePage() {
                 } (0 for none)
               </p>
             )}
+            <div className="mt-3 border-t border-line/40 pt-3">
+              <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">
+                Shot area <span className="font-normal normal-case">— optional, applies to the next ball</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {FIELD_REGIONS.map((r) => (
+                  <button key={r.region} onClick={() => setShotArea(shotArea === r.region ? null : r.region)}
+                    className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                      shotArea === r.region ? 'border-grass bg-grass/15 text-grass' : 'border-line text-mut hover:text-ink'}`}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button className="btn-danger h-12 text-base" disabled={busy} onClick={() => setWicketOpen(true)}>WICKET</button>
               <button className="btn-ghost h-12 text-base" disabled={busy}
@@ -532,17 +599,23 @@ function ResumeModal({ busy, onClose, onSubmit }: {
 }
 
 /** Manual commentary entry — supplements the auto ball-by-ball feed. */
+const FIELDING_EVENTS = [
+  { tag: 'DROPPED CATCH!', label: 'Dropped catch' },
+  { tag: 'RUN OUT MISSED!', label: 'Run out missed' },
+  { tag: 'MISFIELD!', label: 'Misfield' },
+] as const;
+
 function CommentaryBox({ matchId }: { matchId: string }) {
   const [body, setBody] = useState('');
   const [highlight, setHighlight] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const post = async () => {
+  const send = async (text: string, isHighlight: boolean) => {
     setBusy(true); setMsg(null);
     try {
       await api(`/matches/${matchId}/commentary`, {
-        method: 'POST', body: { body, is_highlight: highlight },
+        method: 'POST', body: { body: text, is_highlight: isHighlight },
       });
       setBody(''); setHighlight(false);
       setMsg('Posted ✓');
@@ -552,6 +625,9 @@ function CommentaryBox({ matchId }: { matchId: string }) {
     } finally { setBusy(false); }
   };
 
+  // One-tap fielding events; any typed text becomes the detail suffix.
+  const quick = (tag: string) => send(body.trim() ? `${tag} ${body.trim()}` : tag, true);
+
   return (
     <div className="card space-y-2 p-4">
       <div className="flex items-center justify-between">
@@ -560,12 +636,19 @@ function CommentaryBox({ matchId }: { matchId: string }) {
       </div>
       <textarea className="input min-h-16" placeholder="Add color commentary… (every ball is auto-narrated already)"
         value={body} onChange={(e) => setBody(e.target.value)} />
-      <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs text-mut">
+      <div className="flex flex-wrap items-center gap-2">
+        {FIELDING_EVENTS.map((ev) => (
+          <button key={ev.tag} className="btn-ghost !py-1 text-xs text-gold" disabled={busy}
+            title={`Post "${ev.tag}" (typed text is appended as detail)`}
+            onClick={() => quick(ev.tag)}>
+            {ev.label}
+          </button>
+        ))}
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-mut">
           <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} />
           Highlight
         </label>
-        <button className="btn-primary ml-auto !py-1.5 text-xs" disabled={busy || !body.trim()} onClick={post}>
+        <button className="btn-primary !py-1.5 text-xs" disabled={busy || !body.trim()} onClick={() => send(body, highlight)}>
           Post
         </button>
       </div>
