@@ -90,8 +90,8 @@ export default function ScorerConsolePage() {
     if (!authLoading && !user) router.push('/login');
   }, [authLoading, user, router]);
 
-  // Player pools per team: match squad if set, else the team's registered squad
-  const poolFor = useCallback((teamId: string | undefined): Pick[] => {
+  // Full squad pool (XI + substitutes) — used for fielding selectors only.
+  const fieldingPoolFor = useCallback((teamId: string | undefined): Pick[] => {
     if (!teamId) return [];
     const fromMatch = (squads ?? []).filter((s) => s.team_id === teamId && (s.is_playing_xi || s.is_twelfth));
     if (fromMatch.length) return fromMatch.map((s) => ({ id: s.player_id, name: s.full_name }));
@@ -99,12 +99,29 @@ export default function ScorerConsolePage() {
     return (team?.squad ?? []).map((p) => ({ id: p.id, name: p.full_name }));
   }, [squads, match, teamA, teamB]);
 
+  // Playing-XI-only pool — used for batting/bowling (substitutes cannot bat or bowl).
+  // Falls back to full squad when no explicit XI has been confirmed yet.
+  const xiPoolFor = useCallback((teamId: string | undefined): Pick[] => {
+    if (!teamId) return [];
+    const xi = (squads ?? []).filter((s) => s.team_id === teamId && s.is_playing_xi);
+    if (xi.length) return xi.map((s) => ({ id: s.player_id, name: s.full_name }));
+    return fieldingPoolFor(teamId);
+  }, [squads, fieldingPoolFor]);
+
   const currentInnings = useMemo(
     () => match?.innings?.find((i) => i.seq === (state?.innings_seq ?? match.innings.length)),
     [match, state],
   );
-  const battingPool = poolFor(currentInnings?.batting_team_id);
-  const bowlingPool = poolFor(currentInnings?.bowling_team_id);
+  const battingPool = xiPoolFor(currentInnings?.batting_team_id);
+  const bowlingPool = xiPoolFor(currentInnings?.bowling_team_id);
+  const fieldingPool = fieldingPoolFor(currentInnings?.bowling_team_id);
+
+  // Whether both teams have a confirmed playing XI registered for this match.
+  const xiConfirmed = useMemo(() => {
+    if (!match || !squads?.length) return false;
+    const hasXI = (teamId: string) => (squads ?? []).some((s) => s.team_id === teamId && s.is_playing_xi);
+    return hasXI(match.team_a_id) && hasXI(match.team_b_id);
+  }, [squads, match]);
 
   const call = async (fn: () => Promise<unknown>) => {
     setBusy(true); setError(null);
@@ -171,7 +188,31 @@ export default function ScorerConsolePage() {
       <ScoreHeader state={state} />
       <ErrorBox error={error} />
 
-      {status === 'scheduled' && (
+      {status === 'scheduled' && !xiConfirmed && (
+        <PlayingXIForm
+          match={match}
+          teamA={teamA}
+          teamB={teamB}
+          busy={busy}
+          onConfirm={async (teamAIds, teamBIds) => {
+            await call(async () => {
+              const squadPayload = (teamId: string, squad: { id: string }[], selectedIds: string[]) => ({
+                team_id: teamId,
+                players: squad.map((p) => ({
+                  player_id: p.id,
+                  is_playing_xi: selectedIds.includes(p.id),
+                  is_twelfth: !selectedIds.includes(p.id),
+                })),
+              });
+              await api(`/matches/${matchId}/squads`, { method: 'PUT', body: squadPayload(match.team_a_id, teamA?.squad ?? [], teamAIds) });
+              await api(`/matches/${matchId}/squads`, { method: 'PUT', body: squadPayload(match.team_b_id, teamB?.squad ?? [], teamBIds) });
+              await reloadSquads();
+            });
+          }}
+        />
+      )}
+
+      {status === 'scheduled' && xiConfirmed && (
         <TossForm match={match} busy={busy} onToss={(winner, decision) =>
           call(async () => { await api(`/matches/${matchId}/toss`, { method: 'POST', body: { winner_team_id: winner, decision } }); await reloadMatch(); await reloadSquads(); })} />
       )}
@@ -307,7 +348,7 @@ export default function ScorerConsolePage() {
               Declare innings
             </button>
           </div>
-          <CommentaryBox matchId={matchId} bowlingPool={bowlingPool} />
+          <CommentaryBox matchId={matchId} bowlingPool={fieldingPool} />
         </>
       )}
 
@@ -334,7 +375,7 @@ export default function ScorerConsolePage() {
       )}
 
       {wicketOpen && (
-        <WicketModal state={state} bowlingPool={bowlingPool} battingPool={battingPool} busy={busy}
+        <WicketModal state={state} fieldingPool={fieldingPool} battingPool={battingPool} busy={busy}
           onClose={() => setWicketOpen(false)}
           onSubmit={(w) => { setWicketOpen(false); void postBall({ wicket: w }); }} />
       )}
@@ -349,7 +390,7 @@ export default function ScorerConsolePage() {
 
       {status === 'completed' && (
         <CompletedPanel match={match} state={state} busy={busy}
-          battingPool={[...poolFor(match.team_a_id), ...poolFor(match.team_b_id)]}
+          battingPool={[...fieldingPoolFor(match.team_a_id), ...fieldingPoolFor(match.team_b_id)]}
           onFinalize={(pom) => call(async () => {
             await api(`/matches/${matchId}/finalize`, { method: 'POST', body: pom ? { player_of_match_id: pom } : {} });
             await reloadMatch();
@@ -391,6 +432,93 @@ function ScoreHeader({ state }: { state: LiveState }) {
       {state.this_over && state.this_over.length > 0 && (
         <div className="mt-2 flex gap-1">{state.this_over.map((b, i) => <BallChip key={i} label={b} />)}</div>
       )}
+    </div>
+  );
+}
+
+function PlayingXIForm({ match, teamA, teamB, busy, onConfirm }: {
+  match: MatchDetail; teamA: Team | null; teamB: Team | null; busy: boolean;
+  onConfirm: (teamAIds: string[], teamBIds: string[]) => void;
+}) {
+  const n = (match.rules_snapshot as { players_per_side?: number } | null)?.players_per_side ?? 11;
+  const [selA, setSelA] = useState<Set<string>>(new Set());
+  const [selB, setSelB] = useState<Set<string>>(new Set());
+
+  const toggle = (sel: Set<string>, setSel: (s: Set<string>) => void, id: string) => {
+    const next = new Set(sel);
+    if (next.has(id)) { next.delete(id); } else { next.add(id); }
+    setSel(next);
+  };
+
+  const squadA = teamA?.squad ?? [];
+  const squadB = teamB?.squad ?? [];
+  const canConfirm = selA.size >= 1 && selB.size >= 1;
+
+  const TeamPanel = ({ label, squad, sel, setSel }: {
+    label: string; squad: { id: string; full_name: string; primary_role: string; is_captain: boolean; is_wicket_keeper: boolean }[];
+    sel: Set<string>; setSel: (s: Set<string>) => void;
+  }) => (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-bold uppercase tracking-wide text-mut">{label}</span>
+        <span className={`text-xs font-semibold ${sel.size === n ? 'text-grass' : sel.size > n ? 'text-cherry' : 'text-gold'}`}>
+          {sel.size} / {n} selected
+        </span>
+      </div>
+      {squad.length === 0 ? (
+        <p className="text-xs text-mut">No squad registered — add players to this team&apos;s squad in Manage.</p>
+      ) : (
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {squad.map((p) => (
+            <label key={p.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+              sel.has(p.id) ? 'border-grass bg-grass/10' : 'border-line hover:border-ink/30'
+            }`}>
+              <input type="checkbox" className="shrink-0" checked={sel.has(p.id)} onChange={() => toggle(sel, setSel, p.id)} />
+              <span className="flex-1 font-medium">{p.full_name}</span>
+              <span className="flex shrink-0 items-center gap-1 text-[10px] text-mut">
+                {p.is_captain && <span className="rounded bg-gold/15 px-1 font-bold text-gold">C</span>}
+                {p.is_wicket_keeper && <span className="rounded bg-grass/15 px-1 font-bold text-grass">WK</span>}
+                <span>{p.primary_role.replace(/_/g, ' ')}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      {squad.length > 0 && (
+        <div className="mt-2 flex gap-2">
+          <button type="button" className="btn-ghost flex-1 !py-1 text-xs"
+            onClick={() => setSel(new Set(squad.slice(0, n).map((p) => p.id)))}>
+            Select first {n}
+          </button>
+          <button type="button" className="btn-ghost flex-1 !py-1 text-xs"
+            onClick={() => setSel(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="card space-y-4 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold">Select Playing {n}</h2>
+        <span className="text-xs text-mut">Pick the match squad for each team before the toss</span>
+      </div>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <TeamPanel label={match.team_a_name} squad={squadA} sel={selA} setSel={setSelA} />
+        <TeamPanel label={match.team_b_name} squad={squadB} sel={selB} setSel={setSelB} />
+      </div>
+      {selA.size > n && (
+        <p className="text-xs text-cherry">Team A has {selA.size} selected — only {n} allowed. Deselect {selA.size - n}.</p>
+      )}
+      {selB.size > n && (
+        <p className="text-xs text-cherry">Team B has {selB.size} selected — only {n} allowed. Deselect {selB.size - n}.</p>
+      )}
+      <button className="btn-primary w-full" disabled={busy || !canConfirm || selA.size > n || selB.size > n}
+        onClick={() => onConfirm([...selA], [...selB])}>
+        Confirm Playing {n}s — proceed to toss
+      </button>
     </div>
   );
 }
@@ -507,8 +635,8 @@ function BowlerBar({ state, bowling, nextBowler, onPick }: {
   );
 }
 
-function WicketModal({ state, bowlingPool, battingPool, busy, onClose, onSubmit }: {
-  state: LiveState; bowlingPool: Pick[]; battingPool: Pick[]; busy: boolean;
+function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit }: {
+  state: LiveState; fieldingPool: Pick[]; battingPool: Pick[]; busy: boolean;
   onClose: () => void;
   onSubmit: (w: { type: string; dismissed_player_id?: string; fielder_id?: string }) => void;
 }) {
@@ -548,10 +676,10 @@ function WicketModal({ state, bowlingPool, battingPool, busy, onClose, onSubmit 
         )}
         {needsFielder && (
           <div>
-            <label className="label">Fielder</label>
+            <label className="label">Fielder <span className="text-[10px] font-normal text-mut">(XI + substitutes)</span></label>
             <select className="input" value={fielder} onChange={(e) => setFielder(e.target.value)}>
               <option value="">Select…</option>
-              {bowlingPool.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {fieldingPool.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
         )}

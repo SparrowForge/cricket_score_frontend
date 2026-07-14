@@ -719,6 +719,7 @@ function MatchesPanel({ orgId }: { orgId: string }) {
   const [showRules, setShowRules] = useState(false);
   const [overs, setOvers] = useState('');
   const [maxOversPerBowler, setMaxOversPerBowler] = useState('');
+  const [playersPerSide, setPlayersPerSide] = useState('');
   const [freeHit, setFreeHit] = useState(true);
   const [dls, setDls] = useState(true);
   const [error, setError] = useState<{ message?: string } | null>(null);
@@ -742,6 +743,11 @@ function MatchesPanel({ orgId }: { orgId: string }) {
       const rule_overrides: Record<string, unknown> = {};
       if (overs) rule_overrides.overs_per_innings = Number(overs);
       if (maxOversPerBowler) rule_overrides.max_overs_per_bowler = Number(maxOversPerBowler);
+      if (playersPerSide) {
+        const n = Number(playersPerSide);
+        rule_overrides.players_per_side = n;
+        rule_overrides.wickets_to_fall = n - 1;
+      }
       if (showRules) {
         rule_overrides.no_ball = { runs: 1, free_hit: freeHit };
         rule_overrides.dls = { enabled: dls };
@@ -757,7 +763,7 @@ function MatchesPanel({ orgId }: { orgId: string }) {
           ...(Object.keys(rule_overrides).length ? { rule_overrides } : {}),
         },
       });
-      setOvers(''); setMaxOversPerBowler(''); setVenueId(''); setScheduledAt(localNow());
+      setOvers(''); setMaxOversPerBowler(''); setPlayersPerSide(''); setVenueId(''); setScheduledAt(localNow());
       await reload();
     } catch (err) { setError(err as { message?: string }); }
     finally { setBusy(false); }
@@ -801,6 +807,10 @@ function MatchesPanel({ orgId }: { orgId: string }) {
             <input className="input" type="number" min={1} max={90}
               placeholder={selectedFormat?.rules.overs_per_innings?.toString() ?? 'unlimited'}
               value={overs} onChange={(e) => setOvers(e.target.value)} /></div>
+          <div className="w-28"><label className="label">Players / side</label>
+            <input className="input" type="number" min={2} max={15}
+              placeholder="11"
+              value={playersPerSide} onChange={(e) => setPlayersPerSide(e.target.value)} /></div>
           <button type="button" className="btn-ghost !py-1.5 text-xs" onClick={() => setShowRules(!showRules)}>
             {showRules ? '− Fewer rules' : '+ More match rules'}
           </button>
