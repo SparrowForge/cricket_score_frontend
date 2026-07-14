@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 /**
@@ -240,7 +241,7 @@ function roundedTopBar(x: number, y: number, w: number, h: number, r: number): s
   return `M${x},${y + h} L${x},${y + rr} Q${x},${y} ${x + rr},${y} L${x + w - rr},${y} Q${x + w},${y} ${x + w},${y + rr} L${x + w},${y + h} Z`;
 }
 
-export interface PlayerRunsRow { name: string; team: string; runs: number; balls: number }
+export interface PlayerRunsRow { name: string; playerId?: string; team: string; runs: number; balls: number }
 
 /** Horizontal bars of batter runs, colored by team, value at the bar tip. */
 export function PlayerRunsChart({ rows, colors }: { rows: PlayerRunsRow[]; colors: Record<string, string> }) {
@@ -249,7 +250,13 @@ export function PlayerRunsChart({ rows, colors }: { rows: PlayerRunsRow[]; color
     <div className="space-y-1.5">
       {rows.map((r) => (
         <div key={`${r.team}-${r.name}`} className="flex items-center gap-2 text-xs">
-          <span className="w-28 truncate text-right text-mut sm:w-40" title={r.name}>{r.name}</span>
+          {r.playerId ? (
+            <Link href={`/players/${r.playerId}`} className="w-28 truncate text-right text-mut hover:text-grass hover:underline sm:w-40" title={r.name}>
+              {r.name}
+            </Link>
+          ) : (
+            <span className="w-28 truncate text-right text-mut sm:w-40" title={r.name}>{r.name}</span>
+          )}
           <div className="h-4 min-w-0 flex-1">
             <div className="h-4 rounded-r"
               style={{ width: `${Math.max((r.runs / max) * 100, 1)}%`, background: colors[r.team] ?? TEAM_COLORS[0] }}

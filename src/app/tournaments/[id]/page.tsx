@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useApi } from '@/lib/hooks';
@@ -111,7 +112,7 @@ export default function TournamentPage() {
               {leaders.slice(0, 15).map((l, i) => (
                 <div key={l.player_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                   <span className={`w-6 text-center font-black ${i === 0 ? 'text-gold' : 'text-mut'}`}>{i + 1}</span>
-                  <span className="font-semibold">{l.full_name}</span>
+                  <Link href={`/players/${l.player_id}`} className="font-semibold hover:text-grass hover:underline">{l.full_name}</Link>
                   <span className="text-xs text-mut">{l.team_short_name} · {l.matches_played}m</span>
                   <span className="score-digits ml-auto font-bold">
                     {metric === 'runs' && <>{l.runs_scored} <span className="text-xs font-normal text-mut">runs · SR {l.strike_rate ?? '—'}</span></>}

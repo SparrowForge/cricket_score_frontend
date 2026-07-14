@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
@@ -64,7 +65,8 @@ export function SummaryTab({ state, match }: { state: LiveState | null; match: M
                 {batters.map(([id, b]) => (
                   <tr key={id} className="border-t border-line/50 first:border-0">
                     <td className="py-1.5 font-semibold">
-                      {b.name}{state.engine?.strikerId === id && <span className="text-grass"> *</span>}
+                      <Link href={`/players/${id}`} className="hover:text-grass hover:underline">{b.name}</Link>
+                      {state.engine?.strikerId === id && <span className="text-grass"> *</span>}
                     </td>
                     <td className="score-digits py-1.5 text-right font-bold">{b.runs}</td>
                     <td className="score-digits py-1.5 pl-3 text-right text-mut">({b.balls})</td>
@@ -79,7 +81,9 @@ export function SummaryTab({ state, match }: { state: LiveState | null; match: M
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-mut">Bowling</div>
           {bowler ? (
             <div className="text-sm">
-              <div className="font-semibold">{bowler.name}</div>
+              <div className="font-semibold">
+                <Link href={`/players/${state.current_bowler}`} className="hover:text-grass hover:underline">{bowler.name}</Link>
+              </div>
               <div className="score-digits mt-1 text-mut">
                 {oversFromBalls(bowler.legal_balls)}-{bowler.maidens}-{bowler.runs}-<span className="font-bold text-cherry">{bowler.wickets}</span>
                 <span className="ml-3">Econ {bowler.legal_balls > 0 ? ((bowler.runs * 6) / bowler.legal_balls).toFixed(2) : '—'}</span>
@@ -150,7 +154,7 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
                 {inn.batting.map((b) => (
                   <tr key={b.id} className="border-t border-line/40">
                     <td className="px-4 py-2">
-                      <span className="font-semibold">{b.full_name}</span>
+                      <Link href={`/players/${b.id}`} className="font-semibold hover:text-grass hover:underline">{b.full_name}</Link>
                       <span className="ml-2 text-xs text-mut">{b.is_out ? (b.dismissal ?? 'out').replace(/_/g, ' ') : 'not out'}</span>
                     </td>
                     <td className="score-digits px-2 py-2 text-right font-bold">{b.runs}</td>
@@ -187,7 +191,9 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
               <tbody>
                 {inn.bowling.map((b) => (
                   <tr key={b.id} className="border-t border-line/40">
-                    <td className="px-4 py-2 font-semibold">{b.full_name}</td>
+                    <td className="px-4 py-2">
+                      <Link href={`/players/${b.id}`} className="font-semibold hover:text-grass hover:underline">{b.full_name}</Link>
+                    </td>
                     <td className="score-digits px-2 py-2 text-right text-mut">{oversFromBalls(b.legal_balls)}</td>
                     <td className="score-digits px-2 py-2 text-right text-mut">{b.maidens}</td>
                     <td className="score-digits px-2 py-2 text-right text-mut">{b.runs_conceded}</td>
@@ -457,9 +463,9 @@ export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
 
   // Player runs, aggregated across innings, highest first
   const playerRuns = Object.values(
-    batting.filter((b) => wantTeam(b.team)).reduce<Record<string, { name: string; team: string; runs: number; balls: number }>>((acc, b) => {
+    batting.filter((b) => wantTeam(b.team)).reduce<Record<string, { name: string; playerId: string; team: string; runs: number; balls: number }>>((acc, b) => {
       const key = `${b.team}-${b.player_id}`;
-      acc[key] ??= { name: b.full_name, team: b.team, runs: 0, balls: 0 };
+      acc[key] ??= { name: b.full_name, playerId: b.player_id, team: b.team, runs: 0, balls: 0 };
       acc[key].runs += b.runs;
       acc[key].balls += b.balls;
       return acc;
@@ -577,7 +583,10 @@ export function MvpTab({ matchId, seq }: { matchId: string; seq: number }) {
           <span className={`w-6 text-center font-black ${i === 0 ? 'text-gold' : 'text-mut'}`}>{i + 1}</span>
           <div className="min-w-0 flex-1">
             <div className="flex justify-between text-sm">
-              <span className="font-semibold">{r.full_name} <span className="text-xs text-mut">({r.team})</span></span>
+              <span className="font-semibold">
+                <Link href={`/players/${r.player_id}`} className="hover:text-grass hover:underline">{r.full_name}</Link>
+                {' '}<span className="text-xs text-mut">({r.team})</span>
+              </span>
               <span className="score-digits font-bold">{Number(r.total_points).toFixed(1)}</span>
             </div>
             <div className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-panel-2" title={`Bat ${r.batting_points} · Bowl ${r.bowling_points} · Field ${r.fielding_points}`}>
@@ -606,7 +615,7 @@ export function SquadsTab({ matchId }: { matchId: string }) {
           <ul className="space-y-1.5 text-sm">
             {data.filter((p) => p.team === team).map((p) => (
               <li key={p.player_id} className="flex items-center gap-2">
-                <span className="font-semibold">{p.full_name}</span>
+                <Link href={`/players/${p.player_id}`} className="font-semibold hover:text-grass hover:underline">{p.full_name}</Link>
                 {p.is_captain && <span className="rounded bg-panel-2 px-1 text-[10px] font-bold text-gold">C</span>}
                 {p.is_wicket_keeper && <span className="rounded bg-panel-2 px-1 text-[10px] font-bold text-grass">WK</span>}
                 {p.is_twelfth && <span className="rounded bg-panel-2 px-1 text-[10px] font-bold text-mut">12th</span>}

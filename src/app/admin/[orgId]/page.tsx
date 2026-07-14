@@ -263,7 +263,7 @@ function TeamSquad({ teamId, orgId, canManage, onChange }: {
           {squad.map((s) => (
             <li key={s.id} className="flex items-center gap-2 text-sm">
               <span className="w-6 text-center text-xs text-mut">{s.jersey_number ?? '–'}</span>
-              <span className="font-medium">{s.full_name}</span>
+              <Link href={`/players/${s.id}`} className="font-medium hover:text-grass hover:underline">{s.full_name}</Link>
               {s.is_captain && <span className="rounded bg-panel-2 px-1 text-[10px] font-bold text-gold">C</span>}
               {s.is_wicket_keeper && <span className="rounded bg-panel-2 px-1 text-[10px] font-bold text-grass">WK</span>}
               {canManage && (
