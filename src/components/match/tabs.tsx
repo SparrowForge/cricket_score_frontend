@@ -251,10 +251,19 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
         if (c.body.startsWith('End of over')) {
           const isWicketMaiden = c.body.includes('WICKET MAIDEN!');
           const isMaiden = isWicketMaiden || c.body.includes('Maiden over!');
+          // New body format: "End of over N — X runs: TOTAL/WKTS. ..."
+          // Old format: "End of over N: TOTAL/WKTS. ..."
+          const runsMatch = c.body.match(/End of over \d+ — (\d+) runs:/);
+          const overRuns = runsMatch ? runsMatch[1] : null;
           return (
             <div key={c.id} className={`card p-4 ${isWicketMaiden ? 'border-cherry/50 bg-cherry/5' : isMaiden ? 'border-grass/50 bg-grass/5' : 'border-line bg-panel-2/60'}`}>
               <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-mut">
                 Over summary
+                {overRuns !== null && (
+                  <span className="rounded bg-panel-2 px-2 py-0.5 font-black text-ink">
+                    {overRuns} runs
+                  </span>
+                )}
                 {isMaiden && (
                   <span className={`rounded px-1.5 py-0.5 font-black ${isWicketMaiden ? 'bg-cherry/15 text-cherry' : 'bg-grass/15 text-grass'}`}>
                     {isWicketMaiden ? 'WICKET MAIDEN' : 'MAIDEN'}
@@ -371,6 +380,34 @@ export function OversTab({ matchId, seq }: { matchId: string; seq: number }) {
   );
 }
 
+// ============ Wagon Wheel SVG (reusable) ============
+function WagonWheelSvg({ shots }: { shots: { wagon: { angle_deg: number; distance_pct: number }; is_boundary_four: boolean; is_boundary_six: boolean }[] }) {
+  if (shots.length === 0) {
+    return <div className="py-10 text-center text-sm text-mut">No shot data captured.</div>;
+  }
+  return (
+    <svg viewBox="0 0 200 200" className="mx-auto w-full max-w-xs">
+      <circle cx="100" cy="100" r="95" fill="none" stroke="var(--color-line)" strokeWidth="1" />
+      <circle cx="100" cy="100" r="45" fill="none" stroke="var(--color-line)" strokeDasharray="3 3" strokeWidth="1" />
+      <rect x="97" y="88" width="6" height="24" rx="2" fill="var(--color-panel-2)" stroke="var(--color-line)" />
+      {shots.map((w, i) => {
+        const rad = ((w.wagon.angle_deg - 90) * Math.PI) / 180;
+        // 4s and 6s extend all the way to the boundary ring
+        const dist = (w.is_boundary_four || w.is_boundary_six) ? 95 : (w.wagon.distance_pct / 100) * 92;
+        const x = 100 + Math.cos(rad) * dist;
+        const y = 100 + Math.sin(rad) * dist;
+        const color = w.is_boundary_six ? 'var(--color-gold)' : w.is_boundary_four ? 'var(--color-grass)' : 'var(--color-mut)';
+        return (
+          <g key={i}>
+            <line x1="100" y1="100" x2={x} y2={y} stroke={color} strokeWidth="1.5" opacity="0.8" />
+            <circle cx={x} cy={y} r="2.5" fill={color} />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 // ============ Stats (graphs + wagon wheel + partnerships) ============
 export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
   const { data, loading } = useApi<{
@@ -380,6 +417,7 @@ export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
     batting: { player_id: string; full_name: string; innings: number; team: string; runs: number; balls: number }[];
   }>(`/matches/${matchId}/stats`, [seq]);
   const [teamSel, setTeamSel] = useState('all');
+  const [wagPlayerSel, setWagPlayerSel] = useState('');
   if (loading) return <Spinner />;
   const wagon = data?.wagon_wheel ?? [];
   const partnerships = data?.partnerships ?? [];
@@ -461,29 +499,8 @@ export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
 
       <div className="grid gap-6 lg:grid-cols-2">
       <div className="card p-4">
-        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Wagon wheel</div>
-        {wagon.length === 0 ? (
-          <div className="py-10 text-center text-sm text-mut">No shot data captured for this match.</div>
-        ) : (
-          <svg viewBox="0 0 200 200" className="mx-auto w-full max-w-xs">
-            <circle cx="100" cy="100" r="95" fill="none" stroke="var(--color-line)" strokeWidth="1" />
-            <circle cx="100" cy="100" r="45" fill="none" stroke="var(--color-line)" strokeDasharray="3 3" strokeWidth="1" />
-            <rect x="97" y="88" width="6" height="24" rx="2" fill="var(--color-panel-2)" stroke="var(--color-line)" />
-            {wagon.map((w, i) => {
-              const rad = ((w.wagon.angle_deg - 90) * Math.PI) / 180;
-              const dist = (w.wagon.distance_pct / 100) * 92;
-              const x = 100 + Math.cos(rad) * dist;
-              const y = 100 + Math.sin(rad) * dist;
-              const color = w.is_boundary_six ? 'var(--color-gold)' : w.is_boundary_four ? 'var(--color-grass)' : 'var(--color-mut)';
-              return (
-                <g key={i}>
-                  <line x1="100" y1="100" x2={x} y2={y} stroke={color} strokeWidth="1.5" opacity="0.8" />
-                  <circle cx={x} cy={y} r="2.5" fill={color} />
-                </g>
-              );
-            })}
-          </svg>
-        )}
+        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Wagon wheel — team</div>
+        <WagonWheelSvg shots={wagon} />
         <div className="mt-2 flex justify-center gap-4 text-[10px] text-mut">
           <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-gold" />Six</span>
           <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-grass" />Four</span>
@@ -491,6 +508,35 @@ export function StatsTab({ matchId, seq }: { matchId: string; seq: number }) {
         </div>
       </div>
 
+      <div className="card p-4">
+        <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Wagon wheel — player</div>
+        {wagon.length === 0 ? (
+          <div className="py-10 text-center text-sm text-mut">No shot data captured for this match.</div>
+        ) : (
+          <>
+            {/* Player filter buttons */}
+            <div className="mb-3 flex flex-wrap gap-1">
+              {[...new Set(wagon.map((w) => w.batter))].map((name) => (
+                <button key={name} onClick={() => setWagPlayerSel(wagPlayerSel === name ? '' : name)}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                    wagPlayerSel === name ? 'border-grass bg-grass/15 text-grass' : 'border-line text-mut hover:text-ink'
+                  }`}>
+                  {name}
+                </button>
+              ))}
+            </div>
+            <WagonWheelSvg shots={wagPlayerSel ? wagon.filter((w) => w.batter === wagPlayerSel) : wagon} />
+            <div className="mt-2 flex justify-center gap-4 text-[10px] text-mut">
+              <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-gold" />Six</span>
+              <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-grass" />Four</span>
+              <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-mut" />Other</span>
+            </div>
+          </>
+        )}
+      </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
       <div className="card p-4">
         <div className="mb-3 text-xs font-bold uppercase tracking-wide text-mut">Partnerships</div>
         {partnerships.length === 0 ? (

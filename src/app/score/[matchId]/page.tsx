@@ -307,7 +307,7 @@ export default function ScorerConsolePage() {
               Declare innings
             </button>
           </div>
-          <CommentaryBox matchId={matchId} />
+          <CommentaryBox matchId={matchId} bowlingPool={bowlingPool} />
         </>
       )}
 
@@ -605,19 +605,25 @@ const FIELDING_EVENTS = [
   { tag: 'MISFIELD!', label: 'Misfield' },
 ] as const;
 
-function CommentaryBox({ matchId }: { matchId: string }) {
+function CommentaryBox({ matchId, bowlingPool }: { matchId: string; bowlingPool: Pick[] }) {
   const [body, setBody] = useState('');
   const [highlight, setHighlight] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [fieldingTag, setFieldingTag] = useState<string | null>(null);
+  const [fielderPlayerId, setFielderPlayerId] = useState('');
 
-  const send = async (text: string, isHighlight: boolean) => {
+  const send = async (text: string, isHighlight: boolean, fielderPid?: string) => {
     setBusy(true); setMsg(null);
     try {
       await api(`/matches/${matchId}/commentary`, {
-        method: 'POST', body: { body: text, is_highlight: isHighlight },
+        method: 'POST', body: {
+          body: text,
+          is_highlight: isHighlight,
+          ...(fielderPid ? { fielder_player_id: fielderPid } : {}),
+        },
       });
-      setBody(''); setHighlight(false);
+      setBody(''); setHighlight(false); setFieldingTag(null); setFielderPlayerId('');
       setMsg('Posted ✓');
       setTimeout(() => setMsg(null), 1500);
     } catch (err) {
@@ -625,8 +631,13 @@ function CommentaryBox({ matchId }: { matchId: string }) {
     } finally { setBusy(false); }
   };
 
-  // One-tap fielding events; any typed text becomes the detail suffix.
-  const quick = (tag: string) => send(body.trim() ? `${tag} ${body.trim()}` : tag, true);
+  const postFieldingEvent = () => {
+    if (!fieldingTag) return;
+    const detail = body.trim();
+    const fielderName = bowlingPool.find((p) => p.id === fielderPlayerId)?.name;
+    const text = [fieldingTag, fielderName ? `(${fielderName})` : '', detail].filter(Boolean).join(' ');
+    send(text, true, fielderPlayerId || undefined);
+  };
 
   return (
     <div className="card space-y-2 p-4">
@@ -636,14 +647,39 @@ function CommentaryBox({ matchId }: { matchId: string }) {
       </div>
       <textarea className="input min-h-16" placeholder="Add color commentary… (every ball is auto-narrated already)"
         value={body} onChange={(e) => setBody(e.target.value)} />
-      <div className="flex flex-wrap items-center gap-2">
+
+      {/* Fielding event quick buttons */}
+      <div className="flex flex-wrap gap-2">
         {FIELDING_EVENTS.map((ev) => (
-          <button key={ev.tag} className="btn-ghost !py-1 text-xs text-gold" disabled={busy}
-            title={`Post "${ev.tag}" (typed text is appended as detail)`}
-            onClick={() => quick(ev.tag)}>
+          <button key={ev.tag}
+            className={`btn-ghost !py-1 text-xs ${fieldingTag === ev.tag ? 'border-gold text-gold bg-gold/10' : 'text-gold'}`}
+            disabled={busy}
+            onClick={() => setFieldingTag(fieldingTag === ev.tag ? null : ev.tag)}>
             {ev.label}
           </button>
         ))}
+      </div>
+
+      {/* Bowling-team player selector — shown only when a fielding event is selected */}
+      {fieldingTag && (
+        <div className="rounded-lg border border-gold/30 bg-gold/5 p-3 space-y-2">
+          <div className="text-xs font-semibold text-gold">{fieldingTag} — select fielder (bowling team)</div>
+          <select className="input text-sm" value={fielderPlayerId} onChange={(e) => setFielderPlayerId(e.target.value)}>
+            <option value="">Unknown / skip</option>
+            {bowlingPool.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <div className="flex gap-2">
+            <button className="btn-primary flex-1 !py-1.5 text-xs" disabled={busy} onClick={postFieldingEvent}>
+              Post event
+            </button>
+            <button className="btn-ghost !py-1.5 text-xs" disabled={busy} onClick={() => { setFieldingTag(null); setFielderPlayerId(''); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
         <label className="ml-auto flex items-center gap-1.5 text-xs text-mut">
           <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} />
           Highlight
