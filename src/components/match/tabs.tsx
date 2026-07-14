@@ -126,6 +126,8 @@ interface ScorecardInnings extends InningsRow {
   batting: { id: string; full_name: string; balls: number; runs: number; fours: number; sixes: number; is_out: boolean; dismissal: string | null }[];
   bowling: { id: string; full_name: string; legal_balls: number; maidens: number; runs_conceded: number; wickets: number }[];
   fall_of_wickets: { over_number: number; ball_in_over: number; batter: string; wicket_type: string; wicket_number: number; score_at: number }[];
+  /** 'summary' = reconstructed from match-level stats because ball-by-ball detail isn't available for this innings. */
+  detail_source: 'balls' | 'summary';
 }
 
 export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number }) {
@@ -141,6 +143,11 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
             <span className="font-bold">{inn.batting_team} — innings {inn.seq}{inn.is_follow_on ? ' (follow-on)' : ''}</span>
             <span className="score-digits font-black">{inn.total_runs}/{inn.total_wickets} ({oversFromBalls(inn.legal_balls)})</span>
           </div>
+          {inn.detail_source === 'summary' && (
+            <div className="bg-gold/10 px-4 py-1.5 text-xs text-gold">
+              Ball-by-ball detail isn&apos;t available for this innings — figures below are match totals, not a full over-by-over card.
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -214,13 +221,43 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
 interface CommentaryEntry {
   id: string; body: string; is_highlight: boolean; author: string | null;
   created_at: string; over_number: number | null; ball_in_over: number | null;
+  striker_id: string | null; striker_name: string | null;
+  bowler_id: string | null; bowler_name: string | null;
+  dismissed_player_id: string | null; dismissed_player_name: string | null;
+  fielder_player_id: string | null; fielder_name: string | null;
+}
+interface InningsSummary {
+  seq: number; batting_team: string; total_runs: number; total_wickets: number; legal_balls: number;
+  detail_source: 'balls' | 'summary';
 }
 const COMMENTARY_PAGE = 200; // backend caps limit at 200
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Turns known player-name substrings in free-text commentary into profile links. */
+function linkifyNames(body: string, mentions: readonly (readonly [string | null, string | null])[]) {
+  const known = mentions
+    .filter((m): m is readonly [string, string] => !!m[0] && !!m[1])
+    .filter((m, i, arr) => arr.findIndex((x) => x[1] === m[1]) === i)
+    .sort((a, b) => b[1].length - a[1].length);
+  if (known.length === 0) return body;
+  const pattern = new RegExp(`(${known.map((m) => escapeRegExp(m[1])).join('|')})`, 'g');
+  return body.split(pattern).map((part, i) => {
+    const match = known.find((m) => m[1] === part);
+    return match
+      ? <Link key={i} href={`/players/${match[0]}`} className="font-semibold text-ink hover:text-grass hover:underline">{part}</Link>
+      : <span key={i}>{part}</span>;
+  });
+}
 
 export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }) {
   const { data, loading } = useApi<CommentaryEntry[]>(
     `/matches/${matchId}/commentary?limit=${COMMENTARY_PAGE}`, [seq],
   );
+  const { data: scorecard } = useApi<InningsSummary[]>(`/matches/${matchId}/scorecard`, [seq]);
+  const summaryOnlyInnings = (scorecard ?? []).filter((i) => i.detail_source === 'summary');
   const [older, setOlder] = useState<CommentaryEntry[]>([]);
   const [exhausted, setExhausted] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -232,8 +269,8 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
     return [...(data ?? []), ...older].filter((c) => !seen.has(c.id) && !!seen.add(c.id));
   }, [data, older]);
 
-  if (loading && entries.length === 0) return <Spinner />;
-  if (!entries.length) return <Empty>No commentary yet.</Empty>;
+  if (loading && entries.length === 0 && summaryOnlyInnings.length === 0) return <Spinner />;
+  if (!entries.length && summaryOnlyInnings.length === 0) return <Empty>No commentary yet.</Empty>;
 
   const hasMore = !exhausted && (older.length > 0 ? true : (data?.length ?? 0) === COMMENTARY_PAGE);
 
@@ -253,7 +290,17 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
 
   return (
     <div className="space-y-3">
+      {summaryOnlyInnings.map((inn) => (
+        <div key={inn.seq} className="card border-gold/40 bg-gold/5 p-4 text-xs text-gold">
+          {inn.batting_team} — innings {inn.seq}: ball-by-ball commentary isn&apos;t available for this innings
+          (final score {inn.total_runs}/{inn.total_wickets}, {oversFromBalls(inn.legal_balls)} overs).
+        </div>
+      ))}
       {entries.map((c) => {
+        const mentions = [
+          [c.bowler_id, c.bowler_name], [c.striker_id, c.striker_name],
+          [c.dismissed_player_id, c.dismissed_player_name], [c.fielder_player_id, c.fielder_name],
+        ] as const;
         if (c.body.startsWith('End of over')) {
           const isWicketMaiden = c.body.includes('WICKET MAIDEN!');
           const isMaiden = isWicketMaiden || c.body.includes('Maiden over!');
@@ -277,7 +324,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
                 )}
                 <span className="ml-auto normal-case font-normal">{new Date(c.created_at).toLocaleTimeString()}</span>
               </div>
-              <p className="text-sm font-semibold">{c.body}</p>
+              <p className="text-sm font-semibold">{linkifyNames(c.body, mentions)}</p>
             </div>
           );
         }
@@ -304,7 +351,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
               {c.author && <span>{c.author}</span>}
               <span className="ml-auto">{new Date(c.created_at).toLocaleTimeString()}</span>
             </div>
-            <p className={`text-sm ${textColor ? `${textColor} font-semibold` : ''}`}>{c.body}</p>
+            <p className={`text-sm ${textColor ? `${textColor} font-semibold` : ''}`}>{linkifyNames(c.body, mentions)}</p>
           </div>
         );
       })}
