@@ -9,6 +9,7 @@
   --color-grass-dark: #15803d;
   --color-gold: #fbbf24;         /* highlights (sixes, MVP) */
   --color-cherry: #ef4444;       /* wickets, live dot */
+  --color-sky: #38bdf8;          /* extras (wide / no-ball) */
   --color-ink: #e2e8f0;          /* main text */
   --color-mut: #8b9cbe;          /* muted text */
 }
@@ -24,6 +25,7 @@ html[data-theme="light"] {
   --color-grass-dark: #15803d;
   --color-gold: #d97706;
   --color-cherry: #dc2626;
+  --color-sky: #0284c7;
   --color-ink: #0f172a;
   --color-mut: #5b6b85;
 }
@@ -47,6 +49,8 @@ body { color: var(--color-ink); font-family: ui-sans-serif, system-ui, "Segoe UI
   .ball-chip-w { @apply bg-cherry text-white border-cherry; }
   .ball-chip-4 { @apply bg-grass text-black border-grass; }
   .ball-chip-6 { @apply bg-gold text-black border-gold; }
+  .ball-chip-0 { @apply bg-mut text-pitch border-mut; }
+  .ball-chip-x { @apply bg-sky text-black border-sky; } /* wide / no-ball */
 }
 
 .score-digits { font-variant-numeric: tabular-nums; }

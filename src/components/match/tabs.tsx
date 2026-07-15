@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { LiveState } from '@/lib/useLive';
@@ -222,6 +222,7 @@ interface CommentaryEntry {
   id: string; body: string; is_highlight: boolean; author: string | null;
   created_at: string; over_number: number | null; ball_in_over: number | null;
   striker_id: string | null; striker_name: string | null;
+  non_striker_id: string | null; non_striker_name: string | null;
   bowler_id: string | null; bowler_name: string | null;
   dismissed_player_id: string | null; dismissed_player_name: string | null;
   fielder_player_id: string | null; fielder_name: string | null;
@@ -230,7 +231,7 @@ interface InningsSummary {
   seq: number; batting_team: string; total_runs: number; total_wickets: number; legal_balls: number;
   detail_source: 'balls' | 'summary';
 }
-const COMMENTARY_PAGE = 200; // backend caps limit at 200
+const COMMENTARY_PAGE = 18; // ~3 overs per fetch; older pages stream in on scroll
 
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -253,43 +254,110 @@ function linkifyNames(body: string, mentions: readonly (readonly [string | null,
 }
 
 export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }) {
-  const { data, loading } = useApi<CommentaryEntry[]>(
-    `/matches/${matchId}/commentary?limit=${COMMENTARY_PAGE}`, [seq],
-  );
   const { data: scorecard } = useApi<InningsSummary[]>(`/matches/${matchId}/scorecard`, [seq]);
-  const summaryOnlyInnings = (scorecard ?? []).filter((i) => i.detail_source === 'summary');
-  const [older, setOlder] = useState<CommentaryEntry[]>([]);
+  const innings = useMemo(() => scorecard ?? [], [scorecard]);
+  const detailInnings = useMemo(() => innings.filter((i) => i.detail_source === 'balls'), [innings]);
+  const summaryOnlyInnings = innings.filter((i) => i.detail_source === 'summary');
+
+  // Team/innings selector — defaults to the most recent innings until the user picks one.
+  const [inningsSel, setInningsSel] = useState<number | null>(null);
+  const latestSeq = detailInnings.length ? detailInnings[detailInnings.length - 1].seq : null;
+  const active = inningsSel ?? latestSeq;
+
+  const [entries, setEntries] = useState<CommentaryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [exhausted, setExhausted] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Newest page + previously loaded older pages, deduped (pages can overlap
-  // when new balls arrive between fetches).
-  const entries = useMemo(() => {
-    const seen = new Set<string>();
-    return [...(data ?? []), ...older].filter((c) => !seen.has(c.id) && !!seen.add(c.id));
-  }, [data, older]);
+  const fetchPage = useCallback(
+    (inningsSeq: number, before?: string) => api<CommentaryEntry[]>(
+      `/matches/${matchId}/commentary?limit=${COMMENTARY_PAGE}&innings=${inningsSeq}` +
+      (before ? `&before=${encodeURIComponent(before)}` : ''),
+    ),
+    [matchId],
+  );
 
-  if (loading && entries.length === 0 && summaryOnlyInnings.length === 0) return <Spinner />;
-  if (!entries.length && summaryOnlyInnings.length === 0) return <Empty>No commentary yet.</Empty>;
+  // First page whenever the selected innings changes.
+  useEffect(() => {
+    if (active == null) { setLoading(false); return; }
+    let cancel = false;
+    setLoading(true); setExhausted(false); setEntries([]);
+    fetchPage(active)
+      .then((rows) => {
+        if (cancel) return;
+        setEntries(rows);
+        if (rows.length < COMMENTARY_PAGE) setExhausted(true);
+      })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [active, fetchPage]);
 
-  const hasMore = !exhausted && (older.length > 0 ? true : (data?.length ?? 0) === COMMENTARY_PAGE);
+  // New ball arrived: merge the fresh newest page on top of what's loaded.
+  useEffect(() => {
+    if (active == null || seq === 0) return;
+    let cancel = false;
+    fetchPage(active)
+      .then((rows) => {
+        if (cancel) return;
+        setEntries((prev) => {
+          const seen = new Set(prev.map((c) => c.id));
+          return [...rows.filter((r) => !seen.has(r.id)), ...prev];
+        });
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seq]);
 
-  const loadOlder = async () => {
-    const oldest = entries[entries.length - 1];
+  const loadOlder = useCallback(async () => {
+    if (active == null || loadingOlder || exhausted || entries.length === 0) return;
     setLoadingOlder(true);
     try {
-      const more = await api<CommentaryEntry[]>(
-        `/matches/${matchId}/commentary?limit=${COMMENTARY_PAGE}&before=${encodeURIComponent(oldest.created_at)}`,
-      );
-      setOlder((o) => [...o, ...more]);
+      const oldest = entries[entries.length - 1];
+      const more = await fetchPage(active, oldest.created_at);
+      setEntries((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...more.filter((m) => !seen.has(m.id))];
+      });
       if (more.length < COMMENTARY_PAGE) setExhausted(true);
     } finally {
       setLoadingOlder(false);
     }
-  };
+  }, [active, loadingOlder, exhausted, entries, fetchPage]);
+
+  // Infinite scroll: fetch the next page when the bottom sentinel comes into view.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (ents) => { if (ents[0]?.isIntersecting) loadOlder(); },
+      { rootMargin: '200px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loadOlder]);
+
+  if (loading && entries.length === 0 && summaryOnlyInnings.length === 0) return <Spinner />;
+  if (!entries.length && summaryOnlyInnings.length === 0 && !loading) return <Empty>No commentary yet.</Empty>;
+
+  const teamLabel = (inn: InningsSummary) =>
+    detailInnings.filter((i) => i.batting_team === inn.batting_team).length > 1
+      ? `${inn.batting_team} — inns ${inn.seq}` : inn.batting_team;
 
   return (
     <div className="space-y-3">
+      {detailInnings.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {detailInnings.map((inn) => (
+            <button key={inn.seq} onClick={() => setInningsSel(inn.seq)}
+              className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                active === inn.seq ? 'border-grass bg-grass/15 text-grass' : 'border-line text-mut hover:text-ink'}`}>
+              {teamLabel(inn)}
+            </button>
+          ))}
+        </div>
+      )}
       {summaryOnlyInnings.map((inn) => (
         <div key={inn.seq} className="card border-gold/40 bg-gold/5 p-4 text-xs text-gold">
           {inn.batting_team} — innings {inn.seq}: ball-by-ball commentary isn&apos;t available for this innings
@@ -299,32 +367,110 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
       {entries.map((c) => {
         const mentions = [
           [c.bowler_id, c.bowler_name], [c.striker_id, c.striker_name],
+          [c.non_striker_id, c.non_striker_name],
           [c.dismissed_player_id, c.dismissed_player_name], [c.fielder_player_id, c.fielder_name],
         ] as const;
+        if (c.body.startsWith('End of innings')) {
+          // Sections are " | "-separated: names contain periods ("Md. …"),
+          // so sentence-splitting is unreliable.
+          const [head, ...sections] = c.body.split(' | ');
+          const m = head.match(/^End of innings (\d+): (.+) (\d+)\/(\d+) \((\d+\.\d+) ov\)(?: — (declared|forfeited))?\./);
+          const topBat = sections.find((s) => s.startsWith('BAT: '))?.slice(5).split(' · ') ?? [];
+          const topBowl = sections.find((s) => s.startsWith('BOWL: '))?.slice(6).split(' · ') ?? [];
+          return (
+            <div key={c.id} className="card border-gold/50 bg-gold/5 p-4">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-gold">
+                Innings {m?.[1] ?? ''} complete{m?.[6] ? ` — ${m[6]}` : ''}
+              </div>
+              {m ? (
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <span className="text-sm font-bold">{m[2]}</span>
+                  <span className="text-sm font-black">
+                    {m[3]}/{m[4]} <span className="text-xs font-normal text-mut">({m[5]} ov)</span>
+                  </span>
+                </div>
+              ) : (
+                <p className="mt-1 text-sm font-semibold">{head}</p>
+              )}
+              {(topBat.length > 0 || topBowl.length > 0) && (
+                <div className="mt-3 grid grid-cols-1 gap-3 border-t border-gold/20 pt-3 sm:grid-cols-2">
+                  {topBat.length > 0 && (
+                    <div>
+                      <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-mut">Top batters</div>
+                      {topBat.map((b, i) => (
+                        <div key={i} className="text-xs font-semibold">{b}</div>
+                      ))}
+                    </div>
+                  )}
+                  {topBowl.length > 0 && (
+                    <div className="sm:text-right">
+                      <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-mut">Top bowlers (O-M-R-W)</div>
+                      {topBowl.map((b, i) => (
+                        <div key={i} className="text-xs font-semibold">{b}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }
         if (c.body.startsWith('End of over')) {
           const isWicketMaiden = c.body.includes('WICKET MAIDEN!');
           const isMaiden = isWicketMaiden || c.body.includes('Maiden over!');
           // New body format: "End of over N — X runs: TOTAL/WKTS. ..."
-          // Old format: "End of over N: TOTAL/WKTS. ..."
-          const runsMatch = c.body.match(/End of over \d+ — (\d+) runs:/);
-          const overRuns = runsMatch ? runsMatch[1] : null;
+          // Old (backfilled) format: "End of over N: TOTAL/WKTS. ..." (no per-over run count)
+          const overMatch = c.body.match(/^End of over (\d+)(?: — (\d+) runs)?: (\d+)\/(\d+)\./);
+          const overNumber = overMatch?.[1] ?? null;
+          const overRuns = overMatch?.[2] !== undefined ? Number(overMatch[2]) : null;
+          const total = overMatch?.[3] ?? null;
+          const wkts = overMatch?.[4] ?? null;
+          const wicketMatch = c.body.match(/(\d+) WICKETS?!/);
+          const overWickets = isWicketMaiden ? 1 : wicketMatch ? Number(wicketMatch[1]) : 0;
+          const crr = total !== null && overNumber !== null && Number(overNumber) > 0
+            ? (Number(total) / Number(overNumber)).toFixed(2) : null;
+
+          // Strip the leading score sentence + maiden/wicket flag to split the
+          // remainder into "batter figures" and "bowler figures" (the bowler
+          // figures are anchored by the distinctive "O.B-M-R-W" pattern, since
+          // splitting on ". " would break on "Md." in player names).
+          let rest = c.body.replace(/^End of over \d+(?: — \d+ runs)?: \d+\/\d+\.\s*/, '');
+          if (rest.startsWith('WICKET MAIDEN! ')) rest = rest.slice('WICKET MAIDEN! '.length);
+          else if (rest.startsWith('Maiden over! ')) rest = rest.slice('Maiden over! '.length);
+          else { const m = rest.match(/^\d+ WICKETS?! /); if (m) rest = rest.slice(m[0].length); }
+          const bowlerMatch = rest.match(/\s*([^.]+\s\d+\.\d+-\d+-\d+-\d+)\s*$/);
+          const bowlerLine = bowlerMatch ? bowlerMatch[1].trim() : null;
+          const battersLine = (bowlerMatch ? rest.slice(0, rest.length - bowlerMatch[0].length) : rest).replace(/\.\s*$/, '');
+
           return (
-            <div key={c.id} className={`card p-4 ${isWicketMaiden ? 'border-cherry/50 bg-cherry/5' : isMaiden ? 'border-grass/50 bg-grass/5' : 'border-line bg-panel-2/60'}`}>
-              <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-mut">
-                Over summary
-                {overRuns !== null && (
-                  <span className="rounded bg-panel-2 px-2 py-0.5 font-black text-ink">
-                    {overRuns} runs
-                  </span>
+            <div key={c.id} className={`card p-4 ${overWickets > 0 ? 'border-cherry/50 bg-cherry/5' : isMaiden ? 'border-grass/50 bg-grass/5' : 'border-line bg-panel-2/60'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-mut">
+                    {overNumber !== null ? `Over ${overNumber}` : 'Over summary'}
+                  </div>
+                  <p className="mt-0.5 text-sm font-semibold">
+                    {isMaiden ? 'Maiden over' : overRuns !== null ? `${overRuns} run${overRuns === 1 ? '' : 's'}` : null}
+                    {overWickets > 0 && (
+                      <>
+                        {(isMaiden || overRuns !== null) && ', '}
+                        <span className="text-cherry">{overWickets} wicket{overWickets === 1 ? '' : 's'}</span>
+                      </>
+                    )}
+                  </p>
+                </div>
+                {total !== null && (
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-black text-ink">{total}/{wkts}</div>
+                    {crr !== null && <div className="text-[10px] text-mut">CRR {crr}</div>}
+                  </div>
                 )}
-                {isMaiden && (
-                  <span className={`rounded px-1.5 py-0.5 font-black ${isWicketMaiden ? 'bg-cherry/15 text-cherry' : 'bg-grass/15 text-grass'}`}>
-                    {isWicketMaiden ? 'WICKET MAIDEN' : 'MAIDEN'}
-                  </span>
-                )}
-                <span className="ml-auto normal-case font-normal">{new Date(c.created_at).toLocaleTimeString()}</span>
               </div>
-              <p className="text-sm font-semibold">{linkifyNames(c.body, mentions)}</p>
+              <div className="mt-2 flex items-center justify-between gap-3 text-xs text-mut">
+                <span>{linkifyNames(battersLine, mentions)}</span>
+                {bowlerLine && <span className="shrink-0 whitespace-nowrap font-semibold text-ink">{linkifyNames(bowlerLine, mentions)}</span>}
+              </div>
+              <div className="mt-1 text-right text-[10px] text-mut">{new Date(c.created_at).toLocaleTimeString()}</div>
             </div>
           );
         }
@@ -332,10 +478,15 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
         const fieldingEvent = c.body.startsWith('DROPPED CATCH!') ? 'DROPPED CATCH'
           : c.body.startsWith('RUN OUT MISSED!') ? 'RUN OUT MISSED'
           : c.body.startsWith('MISFIELD!') ? 'MISFIELD' : null;
+        const isBall = c.over_number != null;
         const isWicket = /WICKET!/.test(c.body);
         const isSix = /\bSIX!/.test(c.body);
         const isFour = /\bFOUR!/.test(c.body);
-        const chip = isWicket ? 'W' : isSix ? '6' : isFour ? '4' : null;
+        const isWide = isBall && /, wide/.test(c.body);
+        const isNoBall = isBall && /, no ball/.test(c.body);
+        const isDot = isBall && /, no run/.test(c.body);
+        const chip = isWicket ? 'W' : isSix ? '6' : isFour ? '4'
+          : isWide ? 'wd' : isNoBall ? 'nb' : isDot ? '0' : null;
         const textColor = fieldingEvent ? 'text-gold' : isWicket ? 'text-cherry' : isSix ? 'text-gold' : isFour ? 'text-grass' : '';
         const border = fieldingEvent ? 'border-gold/50' : isWicket ? 'border-cherry/50' : isSix ? 'border-gold/50' : isFour ? 'border-grass/50' : c.is_highlight ? 'border-gold/50' : '';
         return (
@@ -355,10 +506,10 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
           </div>
         );
       })}
-      {hasMore && (
-        <button onClick={loadOlder} disabled={loadingOlder} className="btn-ghost w-full !py-2 text-xs">
-          {loadingOlder ? 'Loading…' : 'Load older commentary'}
-        </button>
+      <div ref={sentinelRef} />
+      {loadingOlder && <div className="py-2 text-center text-xs text-mut">Loading older commentary…</div>}
+      {exhausted && entries.length > 0 && (
+        <div className="py-2 text-center text-[10px] uppercase tracking-wide text-mut">Start of innings</div>
       )}
     </div>
   );

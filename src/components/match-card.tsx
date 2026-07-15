@@ -29,18 +29,21 @@ function TeamRow(
 export function MatchCard({ m }: { m: MatchListItem }) {
   const live = ['live', 'innings_break', 'rain_delay', 'toss'].includes(m.status);
   const completed = m.status === 'completed';
-  const battingA = m.live_summary?.batting_team === m.team_a_short;
 
-  const scoreA = live && battingA
-    ? `${m.live_summary?.score} (${m.live_summary?.overs})`
-    : completed && m.team_a_runs != null
-      ? `${m.team_a_runs}/${m.team_a_wickets} (${oversFromBalls(m.team_a_balls ?? 0)})`
-      : undefined;
-  const scoreB = live && !battingA && m.live_summary
-    ? `${m.live_summary?.score} (${m.live_summary?.overs})`
-    : completed && m.team_b_runs != null
-      ? `${m.team_b_runs}/${m.team_b_wickets} (${oversFromBalls(m.team_b_balls ?? 0)})`
-      : undefined;
+  // The innings rows are updated per-ball in the same transaction as the
+  // live state, so they're safe to show mid-match — this is what keeps a
+  // finished first innings visible while the chase is live.
+  const inningsScore = (runs: number | null, wkts: number | null, balls: number | null) => {
+    if (runs == null) return undefined;
+    const allOut = wkts != null && wkts >= (m.wickets_to_fall ?? 10);
+    return `${runs}${allOut ? ' all out' : `/${wkts}`} (${oversFromBalls(balls ?? 0)})`;
+  };
+  const scoreA = live || completed
+    ? inningsScore(m.team_a_runs, m.team_a_wickets, m.team_a_balls)
+    : undefined;
+  const scoreB = live || completed
+    ? inningsScore(m.team_b_runs, m.team_b_wickets, m.team_b_balls)
+    : undefined;
 
   return (
     <Link href={`/matches/${m.id}`} className="card block p-4 transition-colors hover:border-grass/50">

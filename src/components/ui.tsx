@@ -36,7 +36,12 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function BallChip({ label }: { label: string }) {
-  const cls = label === 'W' ? 'ball-chip-w' : label === '4' ? 'ball-chip-4' : label === '6' ? 'ball-chip-6' : '';
+  const cls = label === 'W' ? 'ball-chip-w'
+    : label === '4' ? 'ball-chip-4'
+    : label === '6' ? 'ball-chip-6'
+    : label === '0' ? 'ball-chip-0'
+    : /wd|nb/.test(label) ? 'ball-chip-x'
+    : '';
   return <span className={`ball-chip ${cls}`}>{label}</span>;
 }
 

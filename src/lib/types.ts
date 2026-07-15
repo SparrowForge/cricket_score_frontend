@@ -13,6 +13,7 @@ export interface MatchListItem {
   team_b_id: string; team_b: string; team_b_short: string; team_b_logo: string | null;
   team_a_runs: number | null; team_a_wickets: number | null; team_a_balls: number | null;
   team_b_runs: number | null; team_b_wickets: number | null; team_b_balls: number | null;
+  wickets_to_fall: number | null;
   venue: string | null;
   live_summary: { batting_team?: string; score?: string; overs?: string; target?: number | null } | null;
 }
