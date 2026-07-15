@@ -463,7 +463,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
                 {total !== null && (
                   <div className="shrink-0 text-right">
                     <div className="text-sm font-black text-ink">
-                      {activeBattingTeam && <span className="font-bold text-grass">{activeBattingTeam} </span>}
+                      {activeBattingTeam && <span className="font-bold text-grass text-[20px]">{activeBattingTeam} </span>}
                       {total}/{wkts}
                     </div>
                     {crr !== null && <div className="text-[10px] text-mut">CRR {crr}</div>}
