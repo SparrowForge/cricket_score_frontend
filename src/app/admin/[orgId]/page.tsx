@@ -602,10 +602,6 @@ function TournamentsPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
       setName(''); setOvers(''); await reload();
     } catch (err) { setError(err as { message?: string }); }
   };
-  const attachTeam = async (tid: string, teamId: string) => {
-    await api(`/tournaments/${tid}/teams`, { method: 'POST', body: { team_id: teamId } });
-    setBusyMsg('Team added ✓'); setTimeout(() => setBusyMsg(''), 1500);
-  };
   const generateFixtures = async (tid: string) => {
     setError(null);
     try {
@@ -666,13 +662,11 @@ function TournamentsPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
             </span>
           </div>
           {expanded === t.id && canEdit && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line/40 pt-3">
-              <select className="input max-w-56" defaultValue="" onChange={(e) => e.target.value && attachTeam(t.id, e.target.value)}>
-                <option value="" disabled>Attach a team…</option>
-                {teams?.map((tm) => <option key={tm.id} value={tm.id}>{tm.name}</option>)}
-              </select>
-              <button className="btn-ghost text-xs" onClick={() => generateFixtures(t.id)}>⚡ Generate round-robin fixtures</button>
-            </div>
+            <TournamentSetup tournamentId={t.id} orgTeams={teams ?? []}
+              onMsg={(msg) => { setBusyMsg(msg); setTimeout(() => setBusyMsg(''), 1500); }}
+              onError={(err) => setError(err)}
+              onChanged={reload}
+              onGenerate={() => generateFixtures(t.id)} />
           )}
         </div>
       ))}
@@ -698,6 +692,65 @@ function TournamentsPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
   );
 }
 
+/** Tournament↔team mapping: attached teams (with detach) + attach select. */
+function TournamentSetup({ tournamentId, orgTeams, onMsg, onError, onChanged, onGenerate }: {
+  tournamentId: string;
+  orgTeams: Team[];
+  onMsg: (msg: string) => void;
+  onError: (err: { message?: string } | null) => void;
+  onChanged: () => Promise<unknown> | void;
+  onGenerate: () => void;
+}) {
+  const { data: detail, reload } = useApi<{ teams: { id: string; name: string; short_name: string }[] }>(
+    `/tournaments/${tournamentId}`,
+  );
+  const attached = detail?.teams ?? [];
+  const unattached = orgTeams.filter((t) => !attached.some((a) => a.id === t.id));
+
+  const attach = async (teamId: string) => {
+    onError(null);
+    try {
+      await api(`/tournaments/${tournamentId}/teams`, { method: 'POST', body: { team_id: teamId } });
+      await reload(); void onChanged(); onMsg('Team added ✓');
+    } catch (err) { onError(err as { message?: string }); }
+  };
+  const detach = async (teamId: string) => {
+    onError(null);
+    try {
+      await api(`/tournaments/${tournamentId}/teams/${teamId}`, { method: 'DELETE' });
+      await reload(); void onChanged(); onMsg('Team removed ✓');
+    } catch (err) { onError(err as { message?: string }); }
+  };
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-line/40 pt-3">
+      <div>
+        <div className="label">Tournament teams</div>
+        {attached.length === 0 ? (
+          <p className="text-xs text-mut">No teams attached yet — attach the teams that play in this tournament.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {attached.map((tm) => (
+              <span key={tm.id} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-3 py-1 text-xs font-semibold">
+                {tm.name}
+                <button type="button" title={`Remove ${tm.name} from tournament`}
+                  className="cursor-pointer text-mut hover:text-cherry" onClick={() => detach(tm.id)}>✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <select className="input max-w-56" value="" onChange={(e) => e.target.value && attach(e.target.value)}>
+          <option value="" disabled>Attach a team…</option>
+          {unattached.map((tm) => <option key={tm.id} value={tm.id}>{tm.name}</option>)}
+        </select>
+        <button type="button" className="btn-ghost text-xs" onClick={onGenerate}>⚡ Generate round-robin fixtures</button>
+      </div>
+    </div>
+  );
+}
+
 /* ================= Matches ================= */
 const localNow = () => {
   const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
@@ -706,13 +759,17 @@ const localNow = () => {
 
 function MatchesPanel({ orgId }: { orgId: string }) {
   const { data: matches, loading, reload } = useApi<MatchListItem[]>(`/matches?org=${orgId}`);
-  const { data: teams } = useApi<Team[]>(`/orgs/${orgId}/teams`);
   const { data: formats } = useApi<{ id: string; name: string; slug: string; is_builtin: boolean; rules: { overs_per_innings: number | null } }[]>('/formats');
   const { data: venues } = useApi<Venue[]>(`/orgs/${orgId}/venues`);
   const { data: tournaments } = useApi<Tournament[]>(`/tournaments?org=${orgId}`);
   const [tournamentId, setTournamentId] = useState('');
   const [teamA, setTeamA] = useState('');
   const [teamB, setTeamB] = useState('');
+  // Only teams attached to the selected tournament can play in it
+  const { data: tournamentDetail } = useApi<{ teams: { id: string; name: string }[] }>(
+    tournamentId ? `/tournaments/${tournamentId}` : null, [tournamentId],
+  );
+  const teams = tournamentId ? tournamentDetail?.teams ?? [] : [];
   const [venueId, setVenueId] = useState('');
   const [scheduledAt, setScheduledAt] = useState(localNow());
   const [formatId, setFormatId] = useState('');
@@ -775,19 +832,20 @@ function MatchesPanel({ orgId }: { orgId: string }) {
       <form onSubmit={create} className="card space-y-3 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <div><label className="label">Tournament</label>
-            <select className="input" value={tournamentId} onChange={(e) => setTournamentId(e.target.value)} required>
+            <select className="input" value={tournamentId}
+              onChange={(e) => { setTournamentId(e.target.value); setTeamA(''); setTeamB(''); }} required>
               <option value="">Select…</option>
               {tournaments?.map((t) => <option key={t.id} value={t.id}>{t.name}{t.season ? ` (${t.season})` : ''}</option>)}
             </select></div>
           <div><label className="label">Team A</label>
-            <select className="input" value={teamA} onChange={(e) => setTeamA(e.target.value)} required>
-              <option value="">Select…</option>
-              {teams?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <select className="input" value={teamA} onChange={(e) => setTeamA(e.target.value)} required disabled={!tournamentId}>
+              <option value="">{tournamentId ? 'Select…' : 'Pick tournament first'}</option>
+              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select></div>
           <div><label className="label">Team B</label>
-            <select className="input" value={teamB} onChange={(e) => setTeamB(e.target.value)} required>
-              <option value="">Select…</option>
-              {teams?.filter((t) => t.id !== teamA).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <select className="input" value={teamB} onChange={(e) => setTeamB(e.target.value)} required disabled={!tournamentId}>
+              <option value="">{tournamentId ? 'Select…' : 'Pick tournament first'}</option>
+              {teams.filter((t) => t.id !== teamA).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select></div>
           <div><label className="label">Venue</label>
             <select className="input" value={venueId} onChange={(e) => setVenueId(e.target.value)}>
