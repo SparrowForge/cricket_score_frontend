@@ -44,6 +44,7 @@ const FIELD_REGIONS = [
   { region: 'deep_extra_cover',   label: 'Deep Extra Cover',    angle: 35,   dist: 90 },
   { region: 'silly_mid_off',      label: 'Silly Mid-Off',       angle: 15,   dist: 12 },
   { region: 'mid_off',            label: 'Mid Off',             angle: 25,   dist: 55 },
+  { region: 'straight',           label: 'Straight',            angle: 180,   dist: 90 },
   { region: 'long_off',           label: 'Long Off',            angle: 15,   dist: 90 },
 
   // --- LEG SIDE / ON SIDE (In Front / Straight) ---

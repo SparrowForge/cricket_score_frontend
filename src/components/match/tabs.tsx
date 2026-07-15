@@ -344,6 +344,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
   const teamLabel = (inn: InningsSummary) =>
     detailInnings.filter((i) => i.batting_team === inn.batting_team).length > 1
       ? `${inn.batting_team} — inns ${inn.seq}` : inn.batting_team;
+  const activeBattingTeam = detailInnings.find((i) => i.seq === active)?.batting_team ?? null;
 
   return (
     <div className="space-y-3">
@@ -450,7 +451,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
                     {overNumber !== null ? `Over ${overNumber}` : 'Over summary'}
                   </div>
                   <p className="mt-0.5 text-sm font-semibold">
-                    {isMaiden ? 'Maiden over' : overRuns !== null ? `${overRuns} run${overRuns === 1 ? '' : 's'}` : null}
+                    {isMaiden && overWickets>0  ? 'Maiden Wicket' : isMaiden ? 'Maiden Over' : overRuns !== null ? `${overRuns} run${overRuns === 1 ? '' : 's'}` : null}
                     {overWickets > 0 && (
                       <>
                         {(isMaiden || overRuns !== null) && ', '}
@@ -461,7 +462,10 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
                 </div>
                 {total !== null && (
                   <div className="shrink-0 text-right">
-                    <div className="text-sm font-black text-ink">{total}/{wkts}</div>
+                    <div className="text-sm font-black text-ink">
+                      {activeBattingTeam && <span className="font-bold">{activeBattingTeam} </span>}
+                      {total}/{wkts}
+                    </div>
                     {crr !== null && <div className="text-[10px] text-mut">CRR {crr}</div>}
                   </div>
                 )}
