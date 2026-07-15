@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useApi } from '@/lib/hooks';
 import { useLiveMatch } from '@/lib/useLive';
-import { MatchDetail, fmtDate } from '@/lib/types';
+import { MatchDetail, fmtDate, oversFromBalls } from '@/lib/types';
 import { useAuth } from '@/lib/auth';
 import { Spinner, StatusBadge, Tabs } from '@/components/ui';
 import {
@@ -17,12 +17,26 @@ export default function MatchCenterPage() {
   const { user } = useAuth();
   const { state, presence, connected } = useLiveMatch(id);
   const seq = state?.seq ?? 0;
-  const { data: match, reload } = useApi<MatchDetail>(`/matches/${id}`, [state?.status]);
+  // seq in the deps keeps the header innings scores fresh on every ball
+  const { data: match, reload } = useApi<MatchDetail>(`/matches/${id}`, [state?.status, seq]);
   const [tab, setTab] = useState('summary');
 
   if (!match) return <Spinner label="Loading match…" />;
 
   const isLive = ['live', 'innings_break', 'rain_delay', 'toss'].includes(match.status);
+
+  // Header scores: innings in batting order, one line per team ("&"-joined for
+  // two-innings formats). Teams that haven't faced a ball yet show nothing.
+  const rules = (match.rules_snapshot ?? {}) as { wickets_to_fall?: number; balls_per_over?: number };
+  const teamScores: { name: string; scores: string[] }[] = [];
+  for (const inn of [...(match.innings ?? [])].sort((a, b) => a.seq - b.seq)) {
+    if (inn.legal_balls <= 0 && inn.total_runs <= 0 && inn.total_wickets <= 0) continue;
+    const allOut = inn.total_wickets >= (rules.wickets_to_fall ?? 10);
+    const score = `${inn.total_runs}${allOut ? ' all out' : `/${inn.total_wickets}`} (${oversFromBalls(inn.legal_balls, rules.balls_per_over ?? 6)})`;
+    const entry = teamScores.find((t) => t.name === inn.batting_team);
+    if (entry) entry.scores.push(score);
+    else teamScores.push({ name: inn.batting_team, scores: [score] });
+  }
 
   return (
     <div className="space-y-5">
@@ -43,6 +57,16 @@ export default function MatchCenterPage() {
           {match.team_a_name} <span className="text-mut">vs</span> {match.team_b_name}
           {match.is_super_over && <span className="ml-2 rounded bg-gold/15 px-2 py-0.5 text-xs font-bold text-gold">SUPER OVER</span>}
         </h1>
+        {teamScores.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {teamScores.map((t) => (
+              <div key={t.name} className="flex flex-wrap items-baseline gap-x-3">
+                <span className="text-sm font-bold">{t.name}</span>
+                <span className="score-digits text-lg font-black text-grass">{t.scores.join(' & ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {match.toss_winner_id && (
           <p className="mt-1 text-xs text-mut">
             {match.toss_winner_id === match.team_a_id ? match.team_a_short : match.team_b_short} won the toss and chose to {match.toss_decision}

@@ -6,15 +6,7 @@ import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { Empty, Spinner } from '@/components/ui';
 import { calcAge, Player } from '@/lib/types';
-
-interface LeaderRow {
-  player_id: string; full_name: string; photo_url: string | null; team_short_name: string | null;
-  matches_played: number;
-  runs_scored?: number; highest_score?: number; strike_rate?: string | null;
-  wickets_taken?: number; economy?: string | null;
-  mvp_points?: string;
-}
-interface Leaders { runs: LeaderRow[]; wickets: LeaderRow[]; mvp: LeaderRow[] }
+import { Leaders, RankCell } from '@/components/medals';
 
 /** Overall (all matches, all tournaments) top performers — same look as the
  *  tournament page's Top Performers tab. */
@@ -42,7 +34,7 @@ function TopPerformers() {
         <div className="card divide-y divide-line/40 p-0">
           {leaders.map((l, i) => (
             <div key={l.player_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <span className={`w-6 text-center font-black ${i === 0 ? 'text-gold' : 'text-mut'}`}>{i + 1}</span>
+              <RankCell rank={i + 1} />
               {l.photo_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={l.photo_url} alt="" className="h-8 w-8 rounded-full object-cover" />

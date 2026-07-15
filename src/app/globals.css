@@ -10,6 +10,8 @@
   --color-gold: #fbbf24;         /* highlights (sixes, MVP) */
   --color-cherry: #ef4444;       /* wickets, live dot */
   --color-sky: #38bdf8;          /* extras (wide / no-ball) */
+  --color-silver: #a8b3c4;       /* rank-2 medal */
+  --color-bronze: #cd7f32;       /* rank-3 medal */
   --color-ink: #e2e8f0;          /* main text */
   --color-mut: #8b9cbe;          /* muted text */
 }
@@ -26,6 +28,8 @@ html[data-theme="light"] {
   --color-gold: #d97706;
   --color-cherry: #dc2626;
   --color-sky: #0284c7;
+  --color-silver: #64748b;
+  --color-bronze: #a05a20;
   --color-ink: #0f172a;
   --color-mut: #5b6b85;
 }

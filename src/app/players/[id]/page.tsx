@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useApi } from '@/lib/hooks';
 import { Empty, Spinner } from '@/components/ui';
 import { calcAge, fmtHeight, PlayerProfile } from '@/lib/types';
+import { Leaders, MedalBadge, playerMedals } from '@/components/medals';
 
 const FORMAT_LABEL: Record<string, string> = {
   t20: 'T20', one_day: 'ODI', test: 'Test', t10: 'T10', sixes: 'Sixes', custom: 'Custom',
@@ -14,6 +15,9 @@ const FORMAT_LABEL: Record<string, string> = {
 export default function PlayerProfilePage() {
   const { id } = useParams<{ id: string }>();
   const { data: p, error, loading } = useApi<PlayerProfile>(`/players/${id}`);
+  // Overall top-3 finishes → gold/silver/bronze badges on the profile
+  const { data: leaders } = useApi<Leaders>('/players/leaders?limit=3');
+  const medals = playerMedals(leaders, id);
 
   if (loading) return <Spinner label="Loading player…" />;
   if (error || !p) return <Empty>Player not found.</Empty>;
@@ -34,6 +38,11 @@ export default function PlayerProfilePage() {
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-black">{p.full_name}</h1>
             {p.display_name && p.display_name !== p.full_name && <p className="text-sm text-mut">&ldquo;{p.display_name}&rdquo;</p>}
+            {medals.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {medals.map((m) => <MedalBadge key={m.metric} rank={m.rank} metric={m.metric} />)}
+              </div>
+            )}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-mut">
               <span className="font-semibold text-ink">{p.primary_role.replace(/_/g, ' ')}</span>
               {p.country && <span>🌍 {p.country}</span>}
