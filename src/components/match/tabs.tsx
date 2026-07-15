@@ -447,7 +447,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
             <div key={c.id} className={`card p-4 ${overWickets > 0 ? 'border-cherry/50 bg-cherry/5' : isMaiden ? 'border-grass/50 bg-grass/5' : 'border-line bg-panel-2/60'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-mut">
+                  <div className="text-[20px] font-bold uppercase tracking-wide text-mut">
                     {overNumber !== null ? `Over ${overNumber}` : 'Over summary'}
                   </div>
                   <p className="mt-0.5 text-sm font-semibold">
