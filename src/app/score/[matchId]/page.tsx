@@ -297,12 +297,13 @@ export default function ScorerConsolePage() {
                 ))}
               </div>
             )}
-            <div className="grid grid-cols-3 gap-2">
-              {[0, 1, 2, 3, 4, 6].map((r) => (
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 1, 2, 3, 4, 5, 6, 7].map((r) => (
                 <button key={r} onClick={() => scoreRuns(r)} disabled={busy}
-                  className={`h-16 rounded-xl text-2xl font-black transition-colors disabled:opacity-40 ${
+                  className={`h-14 rounded-xl text-2xl font-black transition-colors disabled:opacity-40 ${
                     r === 4 ? 'bg-grass/20 text-grass hover:bg-grass hover:text-black'
                     : r === 6 ? 'bg-gold/20 text-gold hover:bg-gold hover:text-black'
+                    : r === 5 || r === 7 ? 'bg-sky/20 text-sky hover:bg-sky hover:text-black'
                     : 'bg-panel-2 hover:bg-line'}`}>
                   {r}
                 </button>
