@@ -55,14 +55,14 @@ body { color: var(--color-ink); font-family: ui-sans-serif, system-ui, "Segoe UI
   .ball-chip-6   { @apply bg-gold text-black border-gold; }              /* six */
   .ball-chip-0   { @apply bg-mut text-pitch border-mut; }                /* dot */
   .ball-chip-x   { @apply bg-sky text-black border-sky; }                /* wide / no-ball / extras */
-  .ball-chip-1   { border-color: #93c5fd; color: #93c5fd; }              /* 1 run — blue-300 */
-  .ball-chip-2   { border-color: #6ee7b7; color: #6ee7b7; }              /* 2 runs — emerald-300 */
-  .ball-chip-3   { border-color: #fdba74; color: #fdba74; }              /* 3 runs — orange-300 */
-  .ball-chip-5   { border-color: #84a0f0; color: #7365ad; }              /* 5 runs — dull-blue-violet-300 */
-  .ball-chip-7   { border-color: #5eead4; color: #5eead4; }              /* 7 runs — teal-300 */
-  .ball-chip-8   { border-color: #f9a8d4; color: #f9a8d4; }              /* 8 runs — pink-300 */
-  .ball-chip-9   { border-color: #fb923c; color: #fb923c; }              /* 9 runs — orange-400 */
-  .ball-chip-big { border-color: #e879f9; color: #e879f9; }
+  .ball-chip-1   { background: #93c5fd; border-color: #93c5fd; color: #000; }  /* 1 run — blue-300 */
+  .ball-chip-2   { background: #6ee7b7; border-color: #6ee7b7; color: #000; }  /* 2 runs — emerald-300 */
+  .ball-chip-3   { background: #fdba74; border-color: #fdba74; color: #000; }  /* 3 runs — orange-300 */
+  .ball-chip-5   { background: #84a0f0; border-color: #84a0f0; color: #000; }  /* 5 runs — dull-blue-violet */
+  .ball-chip-7   { background: #5eead4; border-color: #5eead4; color: #000; }  /* 7 runs — teal-300 */
+  .ball-chip-8   { background: #f9a8d4; border-color: #f9a8d4; color: #000; }  /* 8 runs — pink-300 */
+  .ball-chip-9   { background: #fb923c; border-color: #fb923c; color: #000; }  /* 9 runs — orange-400 */
+  .ball-chip-big { background: #e879f9; border-color: #e879f9; color: #000; }
 }
 
 .score-digits { font-variant-numeric: tabular-nums; }
