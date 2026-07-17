@@ -837,7 +837,8 @@ function WagonWheelSvg({ shots }: { shots: { wagon: { angle_deg: number; distanc
   return (
     <svg viewBox="0 0 200 200" className="mx-auto w-full max-w-xs">
       <circle cx="100" cy="100" r="95" fill="none" stroke="var(--color-line)" strokeWidth="1" />
-      <circle cx="100" cy="100" r="45" fill="none" stroke="var(--color-line)" strokeDasharray="3 3" strokeWidth="1" />
+      {/* 30-yard circle — lightly filled infield */}
+      <circle cx="100" cy="100" r="45" fill="var(--color-grass)" fillOpacity="0.12" stroke="var(--color-line)" strokeDasharray="3 3" strokeWidth="1" />
       <rect x="97" y="88" width="6" height="24" rx="2" fill="var(--color-panel-2)" stroke="var(--color-line)" />
       {shots.map((w, i) => {
         const rad = ((w.wagon.angle_deg - 90) * Math.PI) / 180;
