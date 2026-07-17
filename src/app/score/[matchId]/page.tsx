@@ -676,12 +676,13 @@ function BowlerBar({ state, bowling, nextBowler, onPick }: {
 function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit }: {
   state: LiveState; fieldingPool: Pick[]; battingPool: Pick[]; busy: boolean;
   onClose: () => void;
-  onSubmit: (w: { type: string; runs_batter?: number; dismissed_player_id?: string; fielder_id?: string }) => void;
+  onSubmit: (w: { type: string; runs_batter?: number; dismissed_player_id?: string; fielder_id?: string; wicket_broken_end?: 'striker_end' | 'non_striker_end' }) => void;
 }) {
   const [type, setType] = useState('bowled');
   const [dismissed, setDismissed] = useState<string>('');
   const [fielder, setFielder] = useState<string>('');
   const [runsBefore, setRunsBefore] = useState(0);
+  const [wicketBrokenEnd, setWicketBrokenEnd] = useState<'striker_end' | 'non_striker_end'>('striker_end');
   const needsFielder = ['caught', 'caught_behind', 'run_out', 'stumped'].includes(type);
   const needsDismissed = type === 'run_out';
   const striker = state.engine?.strikerId;
@@ -735,10 +736,23 @@ function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit
             </select>
           </div>
         )}
+        {type === 'run_out' && (
+          <div>
+            <label className="label">Wicket broken at</label>
+            <div className="flex gap-2">
+              {['striker_end', 'non_striker_end'].map((end) => (
+                <button key={end} onClick={() => setWicketBrokenEnd(end as 'striker_end' | 'non_striker_end')}
+                  className={`flex-1 rounded-lg border px-2 py-2 text-xs font-bold ${wicketBrokenEnd === end ? 'border-cherry bg-cherry/15 text-cherry' : 'border-line text-mut'}`}>
+                  {end === 'striker_end' ? 'Striker end' : 'Non-striker end'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <button className="btn-danger w-full" disabled={busy || (needsDismissed && !dismissed)}
           onClick={() => onSubmit({
             type,
-            ...(type === 'run_out' ? { runs_batter: runsBefore } : {}),
+            ...(type === 'run_out' ? { runs_batter: runsBefore, wicket_broken_end: wicketBrokenEnd } : {}),
             ...(dismissed ? { dismissed_player_id: dismissed } : {}),
             ...(fielder ? { fielder_id: fielder } : {}),
           })}>
