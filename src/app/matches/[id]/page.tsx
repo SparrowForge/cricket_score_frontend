@@ -19,6 +19,7 @@ export default function MatchCenterPage() {
   const seq = state?.seq ?? 0;
   // seq in the deps keeps the header innings scores fresh on every ball
   const { data: match, reload } = useApi<MatchDetail>(`/matches/${id}`, [state?.status, seq]);
+  const { data: canScoreData } = useApi<{ can_score: boolean }>(user ? `/matches/${id}/can-score` : null, [user?.id]);
   const [tab, setTab] = useState('summary');
 
   if (!match) return <Spinner label="Loading match…" />;
@@ -111,7 +112,7 @@ export default function MatchCenterPage() {
 
       {tab === 'summary' && <SummaryTab state={state} match={match} />}
       {tab === 'scorecard' && <ScorecardTab matchId={id} seq={seq} />}
-      {tab === 'commentary' && <CommentaryTab matchId={id} seq={seq} />}
+      {tab === 'commentary' && <CommentaryTab matchId={id} seq={seq} canScore={canScoreData?.can_score} />}
       {tab === 'overs' && <OversTab matchId={id} seq={seq} />}
       {tab === 'stats' && <StatsTab matchId={id} seq={seq} />}
       {tab === 'mvp' && <MvpTab matchId={id} seq={seq} />}

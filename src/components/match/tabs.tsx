@@ -221,6 +221,12 @@ export function ScorecardTab({ matchId, seq }: { matchId: string; seq: number })
 interface CommentaryEntry {
   id: string; body: string; is_highlight: boolean; author: string | null;
   created_at: string; over_number: number | null; ball_in_over: number | null;
+  ball_id: string | null;
+  runs_batter: number | null; runs_extras: number | null;
+  extra_type: string | null; secondary_extra_type: string | null;
+  secondary_extra_runs: number | null;
+  is_boundary_four: boolean | null; is_boundary_six: boolean | null;
+  is_wicket: boolean | null; wicket_type: string | null;
   striker_id: string | null; striker_name: string | null;
   non_striker_id: string | null; non_striker_name: string | null;
   bowler_id: string | null; bowler_name: string | null;
@@ -232,6 +238,205 @@ interface InningsSummary {
   detail_source: 'balls' | 'summary';
 }
 const COMMENTARY_PAGE = 18; // ~3 overs per fetch; older pages stream in on scroll
+
+const WICKET_TYPES = [
+  'bowled', 'caught', 'caught_behind', 'caught_and_bowled', 'lbw',
+  'run_out', 'stumped', 'hit_wicket', 'retired_hurt', 'retired_out',
+  'obstructing_field', 'timed_out',
+];
+
+function BallEditModal({ entry, matchId, onClose, onSaved }: {
+  entry: CommentaryEntry; matchId: string; onClose: () => void; onSaved: () => void;
+}) {
+  const autoPen = entry.extra_type === 'wide' || entry.extra_type === 'no_ball' ? 1 : 0;
+  const [runsBatter, setRunsBatter] = useState(entry.runs_batter ?? 0);
+  const [extraType, setExtraType] = useState<string | null>(entry.extra_type ?? null);
+  const [runsExtras, setRunsExtras] = useState(Math.max(0, (entry.runs_extras ?? 0) - autoPen));
+  const [secType, setSecType] = useState<string | null>(entry.secondary_extra_type ?? null);
+  const [secRuns, setSecRuns] = useState(entry.secondary_extra_runs ?? 0);
+  const [isFour, setIsFour] = useState(entry.is_boundary_four ?? false);
+  const [isSix, setIsSix] = useState(entry.is_boundary_six ?? false);
+  const [wicketType, setWicketType] = useState<string | null>(entry.wicket_type ?? null);
+  const [dismissedId, setDismissedId] = useState<string | null>(entry.dismissed_player_id ?? entry.striker_id);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleExtraType = (et: string | null) => {
+    setExtraType(et);
+    setRunsExtras(0);
+    setSecType(null);
+    setSecRuns(0);
+  };
+
+  const save = async () => {
+    setSaving(true); setError(null);
+    try {
+      const payload: Record<string, unknown> = {
+        runs_batter: runsBatter,
+        is_boundary_four: isFour,
+        is_boundary_six: isSix,
+      };
+      if (extraType) {
+        payload.extra_type = extraType;
+        payload.runs_extras = runsExtras;
+        if (extraType === 'no_ball' && secType) {
+          payload.secondary_extra_type = secType;
+          payload.secondary_extra_runs = secRuns;
+        }
+      }
+      if (wicketType) {
+        payload.wicket_type = wicketType;
+        if (dismissedId) payload.dismissed_player_id = dismissedId;
+      }
+      await api(`/matches/${matchId}/balls/${entry.ball_id}`, { method: 'PATCH', body: payload });
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+      <div className="card w-full max-w-sm space-y-4 p-5">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold">Edit {entry.over_number}.{entry.ball_in_over}</h3>
+          <button onClick={onClose} className="text-xl text-mut hover:text-ink">✕</button>
+        </div>
+        <p className="text-xs text-mut">{entry.bowler_name} to {entry.striker_name}</p>
+
+        {/* Batter runs */}
+        <div>
+          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">Batter runs</div>
+          <div className="grid grid-cols-8 gap-1">
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((r) => (
+              <button key={r} onClick={() => setRunsBatter(r)}
+                className={`h-10 rounded-lg text-sm font-bold transition-colors ${
+                  runsBatter === r ? 'bg-grass text-black' : 'bg-panel-2 hover:bg-line'
+                }`}>{r}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Boundary */}
+        <div className="flex gap-2">
+          <button onClick={() => { setIsFour(!isFour); setIsSix(false); }}
+            className={`flex-1 rounded-lg py-2 text-sm font-bold transition-colors ${
+              isFour ? 'border border-grass bg-grass/20 text-grass' : 'bg-panel-2 hover:bg-line'
+            }`}>FOUR</button>
+          <button onClick={() => { setIsSix(!isSix); setIsFour(false); }}
+            className={`flex-1 rounded-lg py-2 text-sm font-bold transition-colors ${
+              isSix ? 'border border-gold bg-gold/20 text-gold' : 'bg-panel-2 hover:bg-line'
+            }`}>SIX</button>
+        </div>
+
+        {/* Extra type */}
+        <div>
+          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">Extra</div>
+          <div className="flex flex-wrap gap-1.5">
+            {[null, 'wide', 'no_ball', 'bye', 'leg_bye'].map((et) => (
+              <button key={et ?? 'none'} onClick={() => handleExtraType(et)}
+                className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                  extraType === et
+                    ? 'border-grass bg-grass/15 text-grass'
+                    : 'border-line text-mut hover:text-ink'
+                }`}>{et ?? 'None'}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Extra runs */}
+        {extraType && (
+          <div>
+            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">
+              {extraType === 'no_ball' ? 'Runs beyond no-ball penalty' : 'Extra runs'}
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {[0, 1, 2, 3, 4, 5, 6].map((r) => (
+                <button key={r} onClick={() => setRunsExtras(r)}
+                  className={`h-9 rounded-lg text-sm font-bold transition-colors ${
+                    runsExtras === r ? 'bg-grass text-black' : 'bg-panel-2 hover:bg-line'
+                  }`}>{r}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* No-ball secondary */}
+        {extraType === 'no_ball' && (
+          <div>
+            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">No-ball extra type</div>
+            <div className="flex gap-1.5">
+              {([null, 'bye', 'leg_bye'] as const).map((et) => (
+                <button key={et ?? 'none'} onClick={() => { setSecType(et); setSecRuns(0); }}
+                  className={`flex-1 rounded-full border px-2 py-1 text-xs font-bold transition-colors ${
+                    secType === et
+                      ? 'border-grass bg-grass/15 text-grass'
+                      : 'border-line text-mut hover:text-ink'
+                  }`}>{et ?? 'None'}</button>
+              ))}
+            </div>
+            {secType && (
+              <div className="mt-2 flex gap-1">
+                {[0, 1, 2, 3, 4].map((r) => (
+                  <button key={r} onClick={() => setSecRuns(r)}
+                    className={`flex-1 h-8 rounded-lg text-xs font-bold transition-colors ${
+                      secRuns === r ? 'bg-grass text-black' : 'bg-panel-2 hover:bg-line'
+                    }`}>{r}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Wicket */}
+        <div>
+          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">Wicket</div>
+          <select value={wicketType ?? ''} onChange={(e) => setWicketType(e.target.value || null)}
+            className="w-full rounded-lg border border-line bg-panel p-2 text-sm">
+            <option value="">No wicket</option>
+            {WICKET_TYPES.map((wt) => (
+              <option key={wt} value={wt}>{wt.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Dismissed player */}
+        {wicketType && (
+          <div>
+            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">Dismissed</div>
+            <div className="flex gap-2">
+              <button onClick={() => setDismissedId(entry.striker_id)}
+                className={`flex-1 rounded-lg py-2 text-xs font-bold transition-colors ${
+                  dismissedId === entry.striker_id
+                    ? 'border border-cherry/40 bg-cherry/20 text-cherry'
+                    : 'bg-panel-2 hover:bg-line'
+                }`}>{entry.striker_name ?? 'Striker'}</button>
+              {entry.non_striker_id && (
+                <button onClick={() => setDismissedId(entry.non_striker_id)}
+                  className={`flex-1 rounded-lg py-2 text-xs font-bold transition-colors ${
+                    dismissedId === entry.non_striker_id
+                      ? 'border border-cherry/40 bg-cherry/20 text-cherry'
+                      : 'bg-panel-2 hover:bg-line'
+                  }`}>{entry.non_striker_name ?? 'Non-striker'}</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {error && <p className="text-xs text-cherry">{error}</p>}
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+          <button onClick={save} disabled={saving} className="btn-primary flex-1">
+            {saving ? 'Saving…' : 'Save correction'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -253,7 +458,7 @@ function linkifyNames(body: string, mentions: readonly (readonly [string | null,
   });
 }
 
-export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }) {
+export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq: number; canScore?: boolean }) {
   const { data: scorecard } = useApi<InningsSummary[]>(`/matches/${matchId}/scorecard`, [seq]);
   const innings = useMemo(() => scorecard ?? [], [scorecard]);
   const detailInnings = useMemo(() => innings.filter((i) => i.detail_source === 'balls'), [innings]);
@@ -268,6 +473,7 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
   const [loading, setLoading] = useState(true);
   const [exhausted, setExhausted] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<CommentaryEntry | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const fetchPage = useCallback(
@@ -337,6 +543,15 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
     obs.observe(el);
     return () => obs.disconnect();
   }, [loadOlder]);
+
+  const onBallSaved = useCallback(() => {
+    setEditingEntry(null);
+    if (active == null) return;
+    fetchPage(active).then((rows) => {
+      setEntries(rows);
+      if (rows.length < COMMENTARY_PAGE) setExhausted(true);
+    }).catch(() => {});
+  }, [active, fetchPage]);
 
   if (loading && entries.length === 0 && summaryOnlyInnings.length === 0) return <Spinner />;
   if (!entries.length && summaryOnlyInnings.length === 0 && !loading) return <Empty>No commentary yet.</Empty>;
@@ -504,7 +719,16 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
               )}
               {!fieldingEvent && chip && <BallChip label={chip} />}
               {c.author && <span>{c.author}</span>}
-              <span className="ml-auto">{new Date(c.created_at).toLocaleTimeString()}</span>
+              <span className="ml-auto flex items-center gap-2">
+                {new Date(c.created_at).toLocaleTimeString()}
+                {canScore && c.ball_id && isBall && (
+                  <button onClick={() => setEditingEntry(c)}
+                    title="Edit this ball"
+                    className="rounded p-0.5 text-mut opacity-60 hover:opacity-100 hover:text-ink transition-opacity">
+                    ✏
+                  </button>
+                )}
+              </span>
             </div>
             <p className={`text-sm ${textColor ? `${textColor} font-semibold` : ''}`}>{linkifyNames(c.body, mentions)}</p>
           </div>
@@ -514,6 +738,14 @@ export function CommentaryTab({ matchId, seq }: { matchId: string; seq: number }
       {loadingOlder && <div className="py-2 text-center text-xs text-mut">Loading older commentary…</div>}
       {exhausted && entries.length > 0 && (
         <div className="py-2 text-center text-[10px] uppercase tracking-wide text-mut">Start of innings</div>
+      )}
+      {editingEntry && (
+        <BallEditModal
+          entry={editingEntry}
+          matchId={matchId}
+          onClose={() => setEditingEntry(null)}
+          onSaved={onBallSaved}
+        />
       )}
     </div>
   );

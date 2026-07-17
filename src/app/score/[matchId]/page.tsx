@@ -379,7 +379,11 @@ export default function ScorerConsolePage() {
       {wicketOpen && (
         <WicketModal state={state} fieldingPool={fieldingPool} battingPool={battingPool} busy={busy}
           onClose={() => setWicketOpen(false)}
-          onSubmit={(w) => { setWicketOpen(false); void postBall({ wicket: w }); }} />
+          onSubmit={(w) => {
+            const { runs_batter, ...wicket } = w;
+            setWicketOpen(false);
+            void postBall({ ...(runs_batter ? { runs_batter } : {}), wicket });
+          }} />
       )}
 
       {resumeOpen && (
@@ -640,11 +644,12 @@ function BowlerBar({ state, bowling, nextBowler, onPick }: {
 function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit }: {
   state: LiveState; fieldingPool: Pick[]; battingPool: Pick[]; busy: boolean;
   onClose: () => void;
-  onSubmit: (w: { type: string; dismissed_player_id?: string; fielder_id?: string }) => void;
+  onSubmit: (w: { type: string; runs_batter?: number; dismissed_player_id?: string; fielder_id?: string }) => void;
 }) {
   const [type, setType] = useState('bowled');
   const [dismissed, setDismissed] = useState<string>('');
   const [fielder, setFielder] = useState<string>('');
+  const [runsBefore, setRunsBefore] = useState(0);
   const needsFielder = ['caught', 'caught_behind', 'run_out', 'stumped'].includes(type);
   const needsDismissed = type === 'run_out';
   const striker = state.engine?.strikerId;
@@ -657,12 +662,25 @@ function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           {['bowled', 'caught', 'caught_behind', 'lbw', 'run_out', 'stumped', 'hit_wicket', 'retired_hurt'].map((t) => (
-            <button key={t} onClick={() => setType(t)}
+            <button key={t} onClick={() => { setType(t); if (t !== 'run_out') setRunsBefore(0); }}
               className={`rounded-lg border px-2 py-2 text-xs font-bold ${type === t ? 'border-cherry bg-cherry/15 text-cherry' : 'border-line text-mut'}`}>
               {t.replace(/_/g, ' ')}
             </button>
           ))}
         </div>
+        {type === 'run_out' && (
+          <div>
+            <label className="label">Runs completed before wicket</label>
+            <div className="flex gap-2">
+              {[0, 1, 2, 3, 4, 5, 6].map((r) => (
+                <button key={r} onClick={() => setRunsBefore(r)}
+                  className={`flex-1 rounded-lg border py-2 text-xs font-bold ${runsBefore === r ? 'border-cherry bg-cherry/15 text-cherry' : 'border-line text-mut'}`}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {needsDismissed && (
           <div>
             <label className="label">Who was out?</label>
@@ -688,6 +706,7 @@ function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit
         <button className="btn-danger w-full" disabled={busy || (needsDismissed && !dismissed)}
           onClick={() => onSubmit({
             type,
+            ...(type === 'run_out' ? { runs_batter: runsBefore } : {}),
             ...(dismissed ? { dismissed_player_id: dismissed } : {}),
             ...(fielder ? { fielder_id: fielder } : {}),
           })}>
