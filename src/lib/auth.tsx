@@ -1,7 +1,14 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api, setToken, getToken } from './api';
+import { api, setToken, getToken, setRefreshToken, getRefreshToken } from './api';
+
+interface TokenPair { access_token: string; refresh_token?: string }
+
+function storeTokens(res: TokenPair) {
+  setToken(res.access_token);
+  if (res.refresh_token) setRefreshToken(res.refresh_token);
+}
 
 export interface User {
   id: string;
@@ -44,8 +51,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { void loadMe(); }, [loadMe]);
 
   const login = async (email: string, password: string) => {
-    const res = await api<{ access_token: string }>('/auth/login', { method: 'POST', body: { email, password } });
-    setToken(res.access_token);
+    const res = await api<TokenPair>('/auth/login', { method: 'POST', body: { email, password } });
+    storeTokens(res);
     await loadMe();
   };
 
@@ -53,20 +60,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!termsAccepted) {
       throw new Error('You must accept the CricLive terms to create an account.');
     }
-    const res = await api<{ access_token: string }>('/auth/register', {
+    const res = await api<TokenPair>('/auth/register', {
       method: 'POST', body: { email, password, full_name: fullName, terms_accepted: termsAccepted },
     });
-    setToken(res.access_token);
+    storeTokens(res);
     await loadMe();
   };
 
   const loginWithGoogle = async (idToken: string) => {
-    const res = await api<{ access_token: string }>('/auth/google', { method: 'POST', body: { id_token: idToken } });
-    setToken(res.access_token);
+    const res = await api<TokenPair>('/auth/google', { method: 'POST', body: { id_token: idToken } });
+    storeTokens(res);
     await loadMe();
   };
 
-  const logout = () => { setToken(null); setUser(null); };
+  const logout = () => {
+    const rt = getRefreshToken();
+    if (rt) void api('/auth/logout', { method: 'POST', body: { refresh_token: rt } }).catch(() => {});
+    setToken(null);
+    setRefreshToken(null);
+    setUser(null);
+  };
 
   return <Ctx.Provider value={{ user, loading, login, register, loginWithGoogle, logout }}>{children}</Ctx.Provider>;
 }

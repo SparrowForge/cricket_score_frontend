@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
+import { enablePush, initPushIfEnabled, pushEnabled, PushStatus } from '@/lib/firebase';
 
 interface Notification {
   id: string; event_type: string; title: string; body: string;
@@ -13,14 +14,21 @@ interface Notification {
 export function NotificationsBell() {
   const { data, reload } = useApi<Notification[]>('/me/notifications');
   const [open, setOpen] = useState(false);
+  const [push, setPush] = useState<PushStatus | 'off'>('off');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = setInterval(() => void reload(), 30_000);
     const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     document.addEventListener('mousedown', onDoc);
+    // Refresh the FCM token for browsers that already opted in (tokens rotate)
+    if (pushEnabled()) { setPush('granted'); void initPushIfEnabled(); }
     return () => { clearInterval(t); document.removeEventListener('mousedown', onDoc); };
   }, [reload]);
+
+  const onEnablePush = async () => {
+    setPush(await enablePush());
+  };
 
   const unread = (data ?? []).filter((n) => !n.read_at).length;
 
@@ -44,6 +52,21 @@ export function NotificationsBell() {
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
             <span className="text-xs font-bold uppercase text-mut">Notifications</span>
             {unread > 0 && <button onClick={markAll} className="text-xs text-grass hover:underline">Mark all read</button>}
+          </div>
+          <div className="border-b border-line px-3 py-2">
+            {push === 'granted' ? (
+              <span className="text-xs text-grass">✓ Push notifications enabled on this device</span>
+            ) : push === 'denied' ? (
+              <span className="text-xs text-mut">Push blocked — allow notifications in your browser settings</span>
+            ) : push === 'unsupported' ? (
+              <span className="text-xs text-mut">Push isn&apos;t supported in this browser</span>
+            ) : push === 'error' ? (
+              <span className="text-xs text-cherry">Couldn&apos;t enable push — try again later</span>
+            ) : (
+              <button onClick={onEnablePush} className="text-xs font-semibold text-grass hover:underline">
+                🔔 Enable push notifications on this device
+              </button>
+            )}
           </div>
           <div className="max-h-96 divide-y divide-line/40 overflow-y-auto">
             {!data?.length ? (
