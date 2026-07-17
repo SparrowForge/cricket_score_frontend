@@ -689,7 +689,6 @@ export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq
                 <span>{linkifyNames(battersLine, mentions)}</span>
                 {bowlerLine && <span className="shrink-0 whitespace-nowrap font-semibold text-ink">{linkifyNames(bowlerLine, mentions)}</span>}
               </div>
-              <div className="mt-1 text-right text-[10px] text-mut">{new Date(c.created_at).toLocaleTimeString()}</div>
             </div>
           );
         }
@@ -728,16 +727,13 @@ export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq
               )}
               {!fieldingEvent && chip && <BallChip label={chip} />}
               {c.author && <span>{c.author}</span>}
-              <span className="ml-auto flex items-center gap-2">
-                {new Date(c.created_at).toLocaleTimeString()}
-                {canScore && c.ball_id && isBall && (
-                  <button onClick={() => setEditingEntry(c)}
-                    title="Edit this ball"
-                    className="rounded p-0.5 text-mut opacity-60 hover:opacity-100 hover:text-ink transition-opacity">
-                    ✏
-                  </button>
-                )}
-              </span>
+              {canScore && c.ball_id && isBall && (
+                <button onClick={() => setEditingEntry(c)}
+                  title="Edit this ball"
+                  className="ml-auto rounded p-0.5 text-mut opacity-60 hover:opacity-100 hover:text-ink transition-opacity">
+                  ✏
+                </button>
+              )}
             </div>
             <p className={`text-sm ${textColor ? `${textColor} font-semibold` : ''}`}>{linkifyNames(c.body, mentions)}</p>
           </div>
