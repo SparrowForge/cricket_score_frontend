@@ -86,6 +86,7 @@ export default function ScorerConsolePage() {
   const [wicketOpen, setWicketOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
   const [nextBowler, setNextBowler] = useState<string | null>(null);
+  const [customRuns, setCustomRuns] = useState('');
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/login');
@@ -152,6 +153,7 @@ export default function ScorerConsolePage() {
       setNbByes(null);
       setShotArea(null);
       setNextBowler(null);
+      setCustomRuns('');
     });
 
   const scoreRuns = (runs: number) => {
@@ -308,6 +310,36 @@ export default function ScorerConsolePage() {
                   {r}
                 </button>
               ))}
+            </div>
+            <div className="mt-2 flex items-center gap-1.5">
+              <button type="button" disabled={busy}
+                onClick={() => setCustomRuns((v) => String(Math.max(0, (parseInt(v, 10) || 0) - 1)))}
+                className="h-10 w-10 flex-none rounded-lg border border-line text-xl font-bold text-mut hover:text-ink disabled:opacity-40">
+                −
+              </button>
+              <input
+                type="number" min="0" inputMode="numeric" placeholder="Any…"
+                value={customRuns}
+                onChange={(e) => setCustomRuns(e.target.value.replace(/[^0-9]/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const n = parseInt(customRuns, 10);
+                    if (!isNaN(n) && n >= 0) void scoreRuns(n);
+                  }
+                }}
+                className="input min-w-0 flex-1 text-center text-xl font-bold"
+              />
+              <button type="button" disabled={busy}
+                onClick={() => setCustomRuns((v) => String((parseInt(v, 10) || 0) + 1))}
+                className="h-10 w-10 flex-none rounded-lg border border-line text-xl font-bold text-mut hover:text-ink disabled:opacity-40">
+                +
+              </button>
+              <button type="button"
+                disabled={busy || customRuns === '' || isNaN(parseInt(customRuns, 10)) || parseInt(customRuns, 10) < 0}
+                onClick={() => { const n = parseInt(customRuns, 10); if (!isNaN(n) && n >= 0) void scoreRuns(n); }}
+                className="h-10 flex-none rounded-lg bg-panel-2 px-4 text-sm font-bold hover:bg-line disabled:opacity-40">
+                Score {customRuns !== '' && !isNaN(parseInt(customRuns, 10)) ? parseInt(customRuns, 10) : ''}
+              </button>
             </div>
             {extraMode && (
               <p className="mt-2 text-center text-xs text-gold">
