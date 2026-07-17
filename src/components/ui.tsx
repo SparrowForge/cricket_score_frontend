@@ -36,11 +36,22 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function BallChip({ label }: { label: string }) {
-  const cls = label === 'W' ? 'ball-chip-w'
-    : label === '4' ? 'ball-chip-4'
-    : label === '6' ? 'ball-chip-6'
-    : label === '0' ? 'ball-chip-0'
-    : /wd|nb/.test(label) ? 'ball-chip-x'
+  const isWicket = /W/.test(label);
+  const isExtra = !isWicket && /wd|nb|b$/.test(label);
+  const num = (!isWicket && !isExtra) ? parseInt(label, 10) : NaN;
+  const cls = isWicket ? 'ball-chip-w'
+    : isExtra ? 'ball-chip-x'
+    : num === 0 ? 'ball-chip-0'
+    : num === 1 ? 'ball-chip-1'
+    : num === 2 ? 'ball-chip-2'
+    : num === 3 ? 'ball-chip-3'
+    : num === 4 ? 'ball-chip-4'
+    : num === 5 ? 'ball-chip-5'
+    : num === 6 ? 'ball-chip-6'
+    : num === 7 ? 'ball-chip-7'
+    : num === 8 ? 'ball-chip-8'
+    : num === 9 ? 'ball-chip-9'
+    : num >= 10 ? 'ball-chip-big'
     : '';
   return <span className={`ball-chip ${cls}`}>{label}</span>;
 }

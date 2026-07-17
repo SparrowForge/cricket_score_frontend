@@ -698,14 +698,23 @@ export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq
           : c.body.startsWith('RUN OUT MISSED!') ? 'RUN OUT MISSED'
           : c.body.startsWith('MISFIELD!') ? 'MISFIELD' : null;
         const isBall = c.over_number != null;
-        const isWicket = /WICKET!/.test(c.body);
-        const isSix = /\bSIX!/.test(c.body);
-        const isFour = /\bFOUR!/.test(c.body);
-        const isWide = isBall && /, wide/.test(c.body);
-        const isNoBall = isBall && /, no ball/.test(c.body);
-        const isDot = isBall && /, no run/.test(c.body);
-        const chip = isWicket ? 'W' : isSix ? '6' : isFour ? '4'
-          : isWide ? 'wd' : isNoBall ? 'nb' : isDot ? '0' : null;
+        const isWicket = c.is_wicket ?? false;
+        const isSix = c.is_boundary_six ?? false;
+        const isFour = c.is_boundary_four ?? false;
+        const isWide = c.extra_type === 'wide';
+        const isNoBall = c.extra_type === 'no_ball';
+        let chip: string | null = null;
+        if (isBall && c.ball_id) {
+          if (isWicket) chip = c.runs_batter ? `${c.runs_batter}W` : 'W';
+          else if (isWide) chip = c.runs_extras != null && c.runs_extras > 1 ? `${c.runs_extras - 1}wd` : 'wd';
+          else if (isNoBall && c.secondary_extra_type) chip = `nb+${c.secondary_extra_runs ?? 0}${c.secondary_extra_type === 'bye' ? 'b' : 'lb'}`;
+          else if (isNoBall) chip = c.runs_batter ? `${c.runs_batter}nb` : 'nb';
+          else if (c.extra_type === 'bye') chip = `${c.runs_extras ?? 0}b`;
+          else if (c.extra_type === 'leg_bye') chip = `${c.runs_extras ?? 0}lb`;
+          else if (isSix) chip = '6';
+          else if (isFour) chip = '4';
+          else chip = String(c.runs_batter ?? 0);
+        }
         const textColor = fieldingEvent ? 'text-gold' : isWicket ? 'text-cherry' : isSix ? 'text-gold' : isFour ? 'text-grass' : '';
         const border = fieldingEvent ? 'border-gold/50' : isWicket ? 'border-cherry/50' : isSix ? 'border-gold/50' : isFour ? 'border-grass/50' : c.is_highlight ? 'border-gold/50' : '';
         return (
