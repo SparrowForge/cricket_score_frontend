@@ -87,8 +87,6 @@ export default function ScorerConsolePage() {
   const [resumeOpen, setResumeOpen] = useState(false);
   const [nextBowler, setNextBowler] = useState<string | null>(null);
   const [customRuns, setCustomRuns] = useState('');
-  const [lastWicketType, setLastWicketType] = useState<string | null>(null);
-  const [selectedWicketEnd, setSelectedWicketEnd] = useState<'striker' | 'non_striker' | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/login');
@@ -150,20 +148,12 @@ export default function ScorerConsolePage() {
           ...payload,
         },
       });
-      if (res.state) {
-        setState({ ...res.state, status: res.state.status ?? 'live', seq: res.seq } as LiveState);
-        // Track the wicket type for the new batter modal
-        if (payload.wicket && typeof payload.wicket === 'object') {
-          const wicket = payload.wicket as Record<string, unknown>;
-          setLastWicketType(wicket.type as string);
-        }
-      }
+      if (res.state) setState({ ...res.state, status: res.state.status ?? 'live', seq: res.seq } as LiveState);
       setExtraMode(null);
       setNbByes(null);
       setShotArea(null);
       setNextBowler(null);
       setCustomRuns('');
-      setSelectedWicketEnd(null);
     });
 
   const scoreRuns = (runs: number) => {
@@ -405,55 +395,15 @@ export default function ScorerConsolePage() {
 
       {needsNewBatter && (
         <Modal title="Next batter in">
-          <div className="space-y-3">
-            {lastWicketType === 'run_out' && (
-              <div className="rounded-lg bg-gold/10 px-3 py-2 text-xs font-semibold text-gold">
-                <p className="mb-1">Wicket broken at which end?</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setSelectedWicketEnd('striker')}
-                    className={`flex-1 rounded-lg py-2 text-sm font-bold transition-colors ${
-                      selectedWicketEnd === 'striker'
-                        ? 'border border-gold bg-gold/20 text-gold'
-                        : 'bg-panel-2 hover:bg-line'
-                    }`}>
-                    Striker End
-                  </button>
-                  <button
-                    onClick={() => setSelectedWicketEnd('non_striker')}
-                    className={`flex-1 rounded-lg py-2 text-sm font-bold transition-colors ${
-                      selectedWicketEnd === 'non_striker'
-                        ? 'border border-gold bg-gold/20 text-gold'
-                        : 'bg-panel-2 hover:bg-line'
-                    }`}>
-                    Non-Striker End
-                  </button>
-                </div>
-              </div>
-            )}
-            <div className="space-y-2">
-              {battingPool
-                .filter((p) => p.id !== state.pending_new_batter && !state.batters?.[p.id])
-                .map((p) => (
-                  <button
-                    key={p.id}
-                    className="btn-ghost w-full justify-start"
-                    disabled={busy || (lastWicketType === 'run_out' && !selectedWicketEnd)}
-                    onClick={() =>
-                      call(async () => {
-                        const body: Record<string, unknown> = { player_id: p.id };
-                        if (lastWicketType === 'run_out' && selectedWicketEnd) {
-                          body.wicket_broken_end = selectedWicketEnd;
-                        }
-                        await api(`/matches/${matchId}/new-batter`, { method: 'POST', body });
-                        setLastWicketType(null);
-                        setSelectedWicketEnd(null);
-                      })
-                    }>
-                    {p.name}
-                  </button>
-                ))}
-            </div>
+          <div className="space-y-2">
+            {battingPool
+              .filter((p) => p.id !== state.pending_new_batter && !state.batters?.[p.id])
+              .map((p) => (
+                <button key={p.id} className="btn-ghost w-full justify-start" disabled={busy}
+                  onClick={() => call(async () => { await api(`/matches/${matchId}/new-batter`, { method: 'POST', body: { player_id: p.id } }); })}>
+                  {p.name}
+                </button>
+              ))}
           </div>
         </Modal>
       )}
