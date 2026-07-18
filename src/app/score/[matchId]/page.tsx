@@ -284,6 +284,15 @@ export default function ScorerConsolePage() {
               ↩ Undo toss — go back to squad selection
             </button>
           )}
+          {status === 'innings_break' && match.innings && match.innings.length === 1 && (
+            <button className="btn-ghost w-full text-xs" disabled={busy}
+              onClick={() => call(async () => {
+                await api(`/matches/${matchId}/toss`, { method: 'DELETE' });
+                await reloadMatch();
+              })}>
+              ↩ Undo toss — go back to squad selection
+            </button>
+          )}
           {status === 'innings_break' && (
             <button className="btn-ghost w-full text-xs" disabled={busy}
               onClick={() => call(async () => {
