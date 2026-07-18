@@ -233,7 +233,11 @@ export default function ScorerConsolePage() {
           onSave={(settings) =>
             call(async () => {
               await api(`/matches/${matchId}/settings`, { method: 'PATCH', body: settings });
-              await reloadMatch();
+              // Settings are committed — reload what the Playing XI step reads
+              // before showing it again: the match carries the new squad size,
+              // the squads carry the roster/selection. Fetched in parallel so
+              // the panel closes on fresh data, never on the pre-save values.
+              await Promise.all([reloadMatch(), reloadSquads()]);
               setSettingsOpen(false);
             })
           }
