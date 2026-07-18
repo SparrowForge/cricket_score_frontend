@@ -216,8 +216,26 @@ export default function ScorerConsolePage() {
       )}
 
       {status === 'scheduled' && xiConfirmed && (
-        <TossForm match={match} busy={busy} onToss={(winner, decision) =>
-          call(async () => { await api(`/matches/${matchId}/toss`, { method: 'POST', body: { winner_team_id: winner, decision } }); await reloadMatch(); await reloadSquads(); })} />
+        <TossForm
+          match={match}
+          busy={busy}
+          onToss={(winner, decision) =>
+            call(async () => {
+              await api(`/matches/${matchId}/toss`, { method: 'POST', body: { winner_team_id: winner, decision } });
+              await reloadMatch();
+              await reloadSquads();
+            })}
+          onBack={() =>
+            call(async () => {
+              // Clear XI selections to allow re-selection
+              if (match?.team_a_id)
+                await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: match.team_a_id, players: (squads ?? []).filter((s) => s.team_id === match.team_a_id).map((s) => ({ player_id: s.player_id, is_playing_xi: false, is_twelfth: !s.is_twelfth })) } });
+              if (match?.team_b_id)
+                await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: match.team_b_id, players: (squads ?? []).filter((s) => s.team_id === match.team_b_id).map((s) => ({ player_id: s.player_id, is_playing_xi: false, is_twelfth: !s.is_twelfth })) } });
+              await reloadSquads();
+            })
+          }
+        />
       )}
 
       {status === 'toss' && match.toss_winner_id && (
@@ -594,15 +612,23 @@ function PlayingXIForm({ match, teamA, teamB, busy, onConfirm }: {
   );
 }
 
-function TossForm({ match, busy, onToss }: {
+function TossForm({ match, busy, onToss, onBack }: {
   match: MatchDetail; busy: boolean;
   onToss: (winnerId: string, decision: 'bat' | 'bowl') => void;
+  onBack?: () => void;
 }) {
   const [winner, setWinner] = useState(match.team_a_id);
   const [decision, setDecision] = useState<'bat' | 'bowl'>('bat');
   return (
     <div className="card space-y-4 p-4">
-      <h2 className="font-bold">Toss</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold">Toss</h2>
+        {onBack && (
+          <button className="btn-ghost text-xs" disabled={busy} onClick={onBack}>
+            ← Back to squad selection
+          </button>
+        )}
+      </div>
       <div>
         <label className="label">Won by</label>
         <div className="flex gap-2">
