@@ -580,6 +580,10 @@ function PlayingXIForm({ match, teamA, teamB, busy, onConfirm }: {
             Select first {n}
           </button>
           <button type="button" className="btn-ghost flex-1 !py-1 text-xs"
+            onClick={() => setSel(new Set(squad.map((p) => p.id)))}>
+            All
+          </button>
+          <button type="button" className="btn-ghost flex-1 !py-1 text-xs"
             onClick={() => setSel(new Set())}>
             Clear
           </button>
