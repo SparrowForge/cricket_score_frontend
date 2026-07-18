@@ -178,6 +178,9 @@ export default function ScorerConsolePage() {
   // striker/bowler could be recovered). Treat that exactly like "openers not
   // set yet" instead of showing a run pad that will just error.
   const needsOpeners = (status === 'toss' || status === 'innings_break' || (status === 'live' && !state.engine)) && !followOn;
+  // Settings can be edited before the toss and between innings (backend allows
+  // scheduled/toss/innings_break); while open it replaces the current stage form.
+  const settingsVisible = ['scheduled', 'toss', 'innings_break'].includes(status) && settingsOpen;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -199,7 +202,7 @@ export default function ScorerConsolePage() {
       <ScoreHeader state={state} />
       <ErrorBox error={error} />
 
-      {status === 'scheduled' && !xiConfirmed && (
+      {status === 'scheduled' && !xiConfirmed && !settingsVisible && (
         <PlayingXIForm
           match={match}
           teamA={teamA}
@@ -223,7 +226,7 @@ export default function ScorerConsolePage() {
         />
       )}
 
-      {status === 'scheduled' && xiConfirmed && settingsOpen && (
+      {settingsVisible && (
         <SettingsForm
           match={match}
           busy={busy}
@@ -237,7 +240,7 @@ export default function ScorerConsolePage() {
         />
       )}
 
-      {status === 'scheduled' && xiConfirmed && !settingsOpen && (
+      {status === 'scheduled' && xiConfirmed && !settingsVisible && (
         <TossForm
           match={match}
           busy={busy}
@@ -260,7 +263,7 @@ export default function ScorerConsolePage() {
         />
       )}
 
-      {status === 'toss' && match.toss_winner_id && (
+      {status === 'toss' && match.toss_winner_id && !settingsVisible && (
         <div className="card space-y-3 p-4">
           <p className="text-center text-sm font-bold">
             {match.toss_winner_id === match.team_a_id ? match.team_a_short : match.team_b_short} won the toss and chose to {match.toss_decision}
@@ -275,7 +278,7 @@ export default function ScorerConsolePage() {
         </div>
       )}
 
-      {followOn && (
+      {followOn && !settingsVisible && (
         <div className="card space-y-3 p-4">
           <p className="text-sm font-bold text-gold">
             Follow-on available — lead of {followOn.lead} (deficit ≥ {followOn.deficit})
@@ -300,7 +303,7 @@ export default function ScorerConsolePage() {
         </div>
       )}
 
-      {needsOpeners && (
+      {needsOpeners && !settingsVisible && (
         <>
           {status === 'live' && (
             <div className="rounded-lg bg-gold/10 px-3 py-2 text-xs font-semibold text-gold">
