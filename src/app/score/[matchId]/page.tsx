@@ -85,6 +85,7 @@ export default function ScorerConsolePage() {
   const [shotArea, setShotArea] = useState<FieldRegion | null>(null);
   const [wicketOpen, setWicketOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [nextBowler, setNextBowler] = useState<string | null>(null);
   const [customRuns, setCustomRuns] = useState('');
 
@@ -185,7 +186,14 @@ export default function ScorerConsolePage() {
           <Link href={`/matches/${matchId}`} className="text-xs text-mut hover:text-grass">← Match center</Link>
           <h1 className="text-lg font-black">{match.team_a_short} vs {match.team_b_short} — Scorer</h1>
         </div>
-        <StatusBadge status={status} />
+        <div className="flex items-center gap-2">
+          {['scheduled', 'toss', 'innings_break'].includes(status) && (
+            <button className="btn-ghost text-xs" disabled={busy} onClick={() => setSettingsOpen(!settingsOpen)}>
+              ⚙️ Settings
+            </button>
+          )}
+          <StatusBadge status={status} />
+        </div>
       </div>
 
       <ScoreHeader state={state} />
@@ -215,7 +223,21 @@ export default function ScorerConsolePage() {
         />
       )}
 
-      {status === 'scheduled' && xiConfirmed && (
+      {status === 'scheduled' && xiConfirmed && settingsOpen && (
+        <SettingsForm
+          match={match}
+          busy={busy}
+          onSave={(settings) =>
+            call(async () => {
+              await api(`/matches/${matchId}/settings`, { method: 'PATCH', body: settings });
+              await reloadMatch();
+              setSettingsOpen(false);
+            })
+          }
+        />
+      )}
+
+      {status === 'scheduled' && xiConfirmed && !settingsOpen && (
         <TossForm
           match={match}
           busy={busy}
@@ -981,6 +1003,55 @@ function CompletedPanel({ match, state, busy, battingPool, onFinalize, onSuperOv
       <Link href={`/matches/${match.id}`} className="block text-center text-sm text-grass hover:underline">
         View full scorecard →
       </Link>
+    </div>
+  );
+}
+
+function SettingsForm({ match, busy, onSave }: {
+  match: MatchDetail; busy: boolean;
+  onSave: (settings: Record<string, unknown>) => void;
+}) {
+  const [overs, setOvers] = useState(match.rules_snapshot?.overs_per_innings?.toString() ?? '');
+  const [players, setPlayers] = useState(match.rules_snapshot?.players_per_side?.toString() ?? '');
+  const [maxOversPerBowler, setMaxOversPerBowler] = useState(match.rules_snapshot?.max_overs_per_bowler?.toString() ?? '');
+  const [freeHit, setFreeHit] = useState((match.rules_snapshot?.no_ball as any)?.free_hit ?? false);
+  const [dlsEnabled, setDlsEnabled] = useState((match.rules_snapshot?.dls as any)?.enabled ?? false);
+
+  return (
+    <div className="card space-y-4 p-4">
+      <h2 className="font-bold">Match Settings</h2>
+      <div>
+        <label className="label text-xs">Overs per innings</label>
+        <input type="number" value={overs} onChange={(e) => setOvers(e.target.value)} className="input input-sm w-full" />
+      </div>
+      <div>
+        <label className="label text-xs">Players per side</label>
+        <input type="number" value={players} onChange={(e) => setPlayers(e.target.value)} className="input input-sm w-full" />
+      </div>
+      <div>
+        <label className="label text-xs">Max overs per bowler</label>
+        <input type="number" value={maxOversPerBowler} onChange={(e) => setMaxOversPerBowler(e.target.value)} className="input input-sm w-full" />
+      </div>
+      <label className="label cursor-pointer gap-2">
+        <input type="checkbox" checked={freeHit} onChange={(e) => setFreeHit(e.target.checked)} className="checkbox checkbox-sm" />
+        <span className="label-text text-xs">Free hit on no-ball</span>
+      </label>
+      <label className="label cursor-pointer gap-2">
+        <input type="checkbox" checked={dlsEnabled} onChange={(e) => setDlsEnabled(e.target.checked)} className="checkbox checkbox-sm" />
+        <span className="label-text text-xs">DLS enabled</span>
+      </label>
+      <button className="btn-primary w-full" disabled={busy} onClick={() => {
+        const settings: Record<string, unknown> = {};
+        const oversNum = parseInt(overs, 10);
+        const playersNum = parseInt(players, 10);
+        const maxOversNum = parseInt(maxOversPerBowler, 10);
+        if (!isNaN(oversNum)) settings.overs_per_innings = oversNum;
+        if (!isNaN(playersNum)) settings.players_per_side = playersNum;
+        if (!isNaN(maxOversNum)) settings.max_overs_per_bowler = maxOversNum;
+        settings.free_hit = freeHit;
+        settings.dls_enabled = dlsEnabled;
+        onSave(settings);
+      }}>Save settings</button>
     </div>
   );
 }
