@@ -220,6 +220,21 @@ export default function ScorerConsolePage() {
           call(async () => { await api(`/matches/${matchId}/toss`, { method: 'POST', body: { winner_team_id: winner, decision } }); await reloadMatch(); await reloadSquads(); })} />
       )}
 
+      {status === 'toss' && match.toss_winner_id && (
+        <div className="card space-y-3 p-4">
+          <p className="text-center text-sm font-bold">
+            {match.toss_winner_id === match.team_a_id ? match.team_a_short : match.team_b_short} won the toss and chose to {match.toss_decision}
+          </p>
+          <button className="btn-ghost w-full text-xs" disabled={busy}
+            onClick={() => call(async () => {
+              await api(`/matches/${matchId}/toss`, { method: 'DELETE' });
+              await reloadMatch();
+            })}>
+            ↩ Undo toss — go back to squad selection
+          </button>
+        </div>
+      )}
+
       {followOn && (
         <div className="card space-y-3 p-4">
           <p className="text-sm font-bold text-gold">
@@ -260,6 +275,15 @@ export default function ScorerConsolePage() {
                 });
                 await reloadMatch();
               })} />
+          {status === 'toss' && (
+            <button className="btn-ghost w-full text-xs" disabled={busy}
+              onClick={() => call(async () => {
+                await api(`/matches/${matchId}/toss`, { method: 'DELETE' });
+                await reloadMatch();
+              })}>
+              ↩ Undo toss — go back to squad selection
+            </button>
+          )}
           {status === 'innings_break' && (
             <button className="btn-ghost w-full text-xs" disabled={busy}
               onClick={() => call(async () => {
