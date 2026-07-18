@@ -9,6 +9,8 @@ export interface MatchListItem {
   tournament_id: string | null;
   tournament_name: string | null;
   winner_team_id: string | null;
+  toss_winner_id: string | null;
+  toss_decision: string | null;
   team_a_id: string; team_a: string; team_a_short: string; team_a_logo: string | null;
   team_b_id: string; team_b: string; team_b_short: string; team_b_logo: string | null;
   team_a_runs: number | null; team_a_wickets: number | null; team_a_balls: number | null;

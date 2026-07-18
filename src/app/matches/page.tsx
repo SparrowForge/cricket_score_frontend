@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '@/lib/hooks';
 import { MatchListItem } from '@/lib/types';
 import { MatchCard } from '@/components/match-card';
@@ -9,7 +9,7 @@ import { Empty, Spinner, Tabs } from '@/components/ui';
 const LIVE_STATUSES = ['live', 'innings_break', 'rain_delay', 'toss'];
 
 export default function HomePage() {
-  const { data: matches, loading } = useApi<MatchListItem[]>('/matches');
+  const { data: matches, loading, reload } = useApi<MatchListItem[]>('/matches');
   const [tab, setTab] = useState('all');
 
   const filtered = useMemo(() => {
@@ -21,6 +21,17 @@ export default function HomePage() {
   }, [matches, tab]);
 
   const liveCount = matches?.filter((m) => LIVE_STATUSES.includes(m.status)).length ?? 0;
+
+  // A live card's score moves every ball, so refresh the list while any match
+  // is in progress. Skipped while the tab is hidden so a backgrounded page
+  // stops hitting the API.
+  useEffect(() => {
+    if (liveCount === 0) return;
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') void reload();
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [liveCount, reload]);
 
   return (
     <div className="space-y-6">
