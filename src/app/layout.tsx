@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { AuthProvider } from '@/lib/auth';
 import { Nav } from '@/components/nav';
+import { Footer } from '@/components/footer';
 
 export const metadata: Metadata = {
   title: 'CricLive — Live Cricket Scoring',
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <AuthProvider>
           <Nav />
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 pt-6">{children}</main>
+          <Footer />
         </AuthProvider>
       </body>
     </html>
