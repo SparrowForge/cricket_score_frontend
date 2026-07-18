@@ -229,9 +229,9 @@ export default function ScorerConsolePage() {
             call(async () => {
               // Clear XI selections to allow re-selection
               if (match?.team_a_id)
-                await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: match.team_a_id, players: (squads ?? []).filter((s) => s.team_id === match.team_a_id).map((s) => ({ player_id: s.player_id, is_playing_xi: false, is_twelfth: !s.is_twelfth })) } });
+                await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: match.team_a_id, players: (squads ?? []).filter((s) => s.team_id === match.team_a_id).map((s) => ({ player_id: s.player_id, is_playing_xi: false, is_twelfth: true })) } });
               if (match?.team_b_id)
-                await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: match.team_b_id, players: (squads ?? []).filter((s) => s.team_id === match.team_b_id).map((s) => ({ player_id: s.player_id, is_playing_xi: false, is_twelfth: !s.is_twelfth })) } });
+                await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: match.team_b_id, players: (squads ?? []).filter((s) => s.team_id === match.team_b_id).map((s) => ({ player_id: s.player_id, is_playing_xi: false, is_twelfth: true })) } });
               await reloadSquads();
             })
           }
