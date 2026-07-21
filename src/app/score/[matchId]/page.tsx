@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { useLiveMatch, LiveState } from '@/lib/useLive';
 import { MatchDetail, SquadPlayer, Team, oversFromBalls } from '@/lib/types';
 import { BallChip, ErrorBox, Modal, Spinner, StatusBadge } from '@/components/ui';
+import { DroppedCatchIcon, MisfieldIcon, RunOutMissedIcon } from '@/components/icons/fielding';
 
 type ExtraMode = null | 'wide' | 'no_ball' | 'bye' | 'leg_bye';
 // A no-ball can ALSO have byes/leg-byes run off it — the no-ball penalty
@@ -886,10 +887,12 @@ function ResumeModal({ busy, onClose, onSubmit }: {
 }
 
 /** Manual commentary entry — supplements the auto ball-by-ball feed. */
+// Icons match the badges the commentary feed renders for these tags, so the
+// button a scorer presses looks like the entry it produces.
 const FIELDING_EVENTS = [
-  { tag: 'DROPPED CATCH!', label: 'Dropped catch' },
-  { tag: 'RUN OUT MISSED!', label: 'Run out missed' },
-  { tag: 'MISFIELD!', label: 'Misfield' },
+  { tag: 'DROPPED CATCH!', label: 'Dropped catch', Icon: DroppedCatchIcon },
+  { tag: 'RUN OUT MISSED!', label: 'Run out missed', Icon: RunOutMissedIcon },
+  { tag: 'MISFIELD!', label: 'Misfield', Icon: MisfieldIcon },
 ] as const;
 
 function CommentaryBox({ matchId, bowlingPool }: { matchId: string; bowlingPool: Pick[] }) {
@@ -942,7 +945,7 @@ function CommentaryBox({ matchId, bowlingPool }: { matchId: string; bowlingPool:
             className={`btn-ghost !py-1 text-xs ${fieldingTag === ev.tag ? 'border-gold text-gold bg-gold/10' : 'text-gold'}`}
             disabled={busy}
             onClick={() => setFieldingTag(fieldingTag === ev.tag ? null : ev.tag)}>
-            {ev.label}
+            <span className="inline-flex items-center gap-1"><ev.Icon size={13} /> {ev.label}</span>
           </button>
         ))}
       </div>

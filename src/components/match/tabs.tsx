@@ -7,6 +7,7 @@ import { useApi } from '@/lib/hooks';
 import { LiveState } from '@/lib/useLive';
 import { InningsRow, MatchDetail, SquadPlayer, oversFromBalls } from '@/lib/types';
 import { BallChip, Empty, Spinner } from '@/components/ui';
+import { DroppedCatchIcon, MisfieldIcon, RunOutMissedIcon } from '@/components/icons/fielding';
 import {
   ChartLegend, OverComparisonChart, PlayerRunsChart, TeamFilter, WormChart, WormSeries, teamColorMap,
 } from '@/components/match/charts';
@@ -458,6 +459,18 @@ function linkifyNames(body: string, mentions: readonly (readonly [string | null,
   });
 }
 
+/**
+ * Fielding errors are posted by the scorer's quick buttons as manual
+ * commentary prefixed with these tags (the same strings stats.service.ts
+ * counts for MVP penalties). Each gets its own icon so the kind of error is
+ * readable at a glance when scrolling the feed.
+ */
+const FIELDING_EVENTS = [
+  { prefix: 'DROPPED CATCH!', label: 'Dropped catch', Icon: DroppedCatchIcon },
+  { prefix: 'RUN OUT MISSED!', label: 'Run out missed', Icon: RunOutMissedIcon },
+  { prefix: 'MISFIELD!', label: 'Misfield', Icon: MisfieldIcon },
+] as const;
+
 export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq: number; canScore?: boolean }) {
   const { data: scorecard } = useApi<InningsSummary[]>(`/matches/${matchId}/scorecard`, [seq]);
   const innings = useMemo(() => scorecard ?? [], [scorecard]);
@@ -693,9 +706,7 @@ export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq
           );
         }
         // Fielding events posted from the scorer console's quick buttons
-        const fieldingEvent = c.body.startsWith('DROPPED CATCH!') ? 'DROPPED CATCH'
-          : c.body.startsWith('RUN OUT MISSED!') ? 'RUN OUT MISSED'
-          : c.body.startsWith('MISFIELD!') ? 'MISFIELD' : null;
+        const fieldingEvent = FIELDING_EVENTS.find((f) => c.body.startsWith(f.prefix)) ?? null;
         const isBall = c.over_number != null;
         const isWicket = c.is_wicket ?? false;
         const isSix = c.is_boundary_six ?? false;
@@ -721,8 +732,12 @@ export function CommentaryTab({ matchId, seq, canScore }: { matchId: string; seq
             <div className="mb-1 flex items-center gap-2 text-xs text-mut">
               {c.over_number != null && <span className="font-bold text-ink">{c.over_number}.{c.ball_in_over}</span>}
               {fieldingEvent && (
-                <span className="rounded bg-gold/15 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-gold">
-                  {fieldingEvent}
+                <span
+                  title={fieldingEvent.label}
+                  className="inline-flex items-center gap-1 rounded bg-gold/15 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-gold"
+                >
+                  <fieldingEvent.Icon size={12} />
+                  {fieldingEvent.label}
                 </span>
               )}
               {!fieldingEvent && chip && <BallChip label={chip} />}
