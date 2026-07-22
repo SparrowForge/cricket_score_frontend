@@ -14,6 +14,11 @@ export interface DrainResult {
    *  False for a plain network failure, which just needs a retry. */
   stuck: boolean;
   errorMessage: string | null;
+  /** Authoritative live state the batch endpoint returns once it applies the
+   *  queue — the caller adopts it so the display reconciles onto server truth
+   *  the moment a sync lands, without waiting on the websocket echo. Null when
+   *  nothing was sent (empty queue) or the request failed. */
+  state: unknown | null;
 }
 
 const storageKey = (matchId: string) => `outbox:${matchId}`;
@@ -104,13 +109,16 @@ export const Outbox = {
 
   /** Push the queue to the server in order. Never throws — failures stay queued. */
   async drain(matchId: string): Promise<DrainResult> {
-    if (draining.has(matchId)) return { left: readQueue(matchId).length, stuck: false, errorMessage: null };
+    if (draining.has(matchId)) return { left: readQueue(matchId).length, stuck: false, errorMessage: null, state: null };
     draining.add(matchId);
     try {
       const queue = readQueue(matchId);
-      if (queue.length === 0) return { left: 0, stuck: false, errorMessage: null };
+      if (queue.length === 0) return { left: 0, stuck: false, errorMessage: null, state: null };
 
-      let data: { results: { client_event_id: string; status: string; error?: { message?: string } }[] };
+      let data: {
+        results: { client_event_id: string; status: string; error?: { message?: string } }[];
+        state?: unknown;
+      };
       try {
         data = await withTimeout(
           api(`/matches/${matchId}/balls/batch`, { method: 'POST', body: { balls: queue } }),
@@ -124,7 +132,7 @@ export const Outbox = {
         // still be in flight — withTimeout stops waiting on it, it doesn't
         // cancel it.)
         const message = err instanceof ApiError ? err.message : null; // null = no server reached, not a rules error
-        return { left: queue.length, stuck: false, errorMessage: message };
+        return { left: queue.length, stuck: false, errorMessage: message, state: null };
       }
 
       const resolvedIds = new Set<string>();
@@ -145,7 +153,7 @@ export const Outbox = {
       const current = readQueue(matchId);
       const remaining = current.filter((b) => !resolvedIds.has(b.client_event_id));
       writeQueue(matchId, remaining);
-      return { left: remaining.length, stuck: failedEventId !== null, errorMessage };
+      return { left: remaining.length, stuck: failedEventId !== null, errorMessage, state: data.state ?? null };
     } finally {
       draining.delete(matchId);
     }

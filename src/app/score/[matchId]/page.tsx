@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api, uuid, ApiError } from '@/lib/api';
-import { Outbox } from '@/lib/outbox';
+import { Outbox, QueuedBall } from '@/lib/outbox';
+import { predict } from '@/lib/predict';
 import { useApi } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth';
 import { useLiveMatch, LiveState } from '@/lib/useLive';
-import { MatchDetail, SquadPlayer, Team, oversFromBalls } from '@/lib/types';
+import { MatchDetail, SquadMember, SquadPlayer, Team, oversFromBalls } from '@/lib/types';
 import { BallChip, ErrorBox, Modal, Spinner, StatusBadge } from '@/components/ui';
 import { DroppedCatchIcon, MisfieldIcon, RunOutMissedIcon } from '@/components/icons/fielding';
 
@@ -79,8 +80,8 @@ export default function ScorerConsolePage() {
   const { matchId } = useParams<{ matchId: string }>();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  const { state } = useLiveMatch(matchId);
-  const { data: match, reload: reloadMatch } = useApi<MatchDetail>(`/matches/${matchId}`, [state?.status]);
+  const { state: serverState, setState: setServerState } = useLiveMatch(matchId);
+  const { data: match, reload: reloadMatch } = useApi<MatchDetail>(`/matches/${matchId}`, [serverState?.status]);
   const { data: squads, reload: reloadSquads } = useApi<SquadPlayer[]>(`/matches/${matchId}/squads`);
   const { data: teamA } = useApi<Team>(match ? `/teams/${match.team_a_id}` : null);
   const { data: teamB } = useApi<Team>(match ? `/teams/${match.team_b_id}` : null);
@@ -93,23 +94,48 @@ export default function ScorerConsolePage() {
   const [wicketOpen, setWicketOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [squadEditOpen, setSquadEditOpen] = useState(false);
+  const [squadChangeOpen, setSquadChangeOpen] = useState(false);
   const [nextBowler, setNextBowler] = useState<string | null>(null);
   const [customRuns, setCustomRuns] = useState('');
 
-  // Offline-first ball queue (see lib/outbox.ts): `queued` mirrors what's
-  // sitting in localStorage for this match, `stuck` is true only when the
-  // server actively rejected the head-of-queue ball (a genuine rules
+  // Offline-first ball queue (see lib/outbox.ts): `pendingBalls` mirrors what's
+  // sitting in localStorage for this match — its balls are overlaid onto the
+  // last server state (via predict, below) so the display reflects a tap
+  // instantly, before the server has confirmed it. `stuck` is true only when
+  // the server actively rejected the head-of-queue ball (a genuine rules
   // conflict, not just "offline") and it needs the scorer's attention.
-  const [queued, setQueued] = useState(0);
+  const [pendingBalls, setPendingBalls] = useState<QueuedBall[]>([]);
   const [stuck, setStuck] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const queued = pendingBalls.length;
+
+  // Re-read the outbox into React state so the prediction (and banner) update.
+  const refreshPending = useCallback(() => {
+    if (!matchId) return;
+    setPendingBalls(Outbox.pending(matchId));
+  }, [matchId]);
+
   const drainQueue = useCallback(async () => {
     if (!matchId) return;
     const result = await Outbox.drain(matchId);
-    setQueued(result.left);
+    setPendingBalls(Outbox.pending(matchId));
     setStuck(result.stuck);
     setSyncError(result.errorMessage);
-  }, [matchId]);
+    // Adopt the authoritative state the batch returned so the display
+    // reconciles onto server truth the instant a sync lands — no waiting on
+    // the websocket echo, no flicker between the two.
+    if (result.state) setServerState(result.state as LiveState);
+  }, [matchId, setServerState]);
+
+  // The display: the server's confirmed state with the not-yet-synced balls
+  // predicted on top. This is what makes entry feel instant — the score,
+  // over, strike and wicket move immediately, then converge on the server as
+  // the queue drains.
+  const state = useMemo(
+    () => predict(serverState, pendingBalls, match?.rules_snapshot),
+    [serverState, pendingBalls, match?.rules_snapshot],
+  );
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/login');
@@ -120,9 +146,8 @@ export default function ScorerConsolePage() {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!matchId) return;
-    const n = Outbox.pending(matchId).length;
-    setQueued(n);
-    if (n > 0) void drainQueue();
+    setPendingBalls(Outbox.pending(matchId));
+    if (Outbox.pending(matchId).length > 0) void drainQueue();
   }, [matchId, drainQueue]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -192,13 +217,16 @@ export default function ScorerConsolePage() {
   // would for any other viewer watching this match.
   const postBall = (payload: Record<string, unknown>) => {
     const area = FIELD_REGIONS.find((r) => r.region === shotArea);
-    const n = Outbox.add(matchId, {
+    Outbox.add(matchId, {
       client_event_id: uuid(),
-      ...(nextBowler ? { bowler_id: nextBowler } : {}),
+      // Carry the current bowler explicitly so the optimistic prediction (and
+      // the server) always know who bowled, even mid-over when no change was
+      // picked — `nextBowler` is set only when the scorer changes bowler.
+      bowler_id: nextBowler ?? state?.current_bowler ?? undefined,
       ...(area ? { wagon: { region: area.region, angle_deg: area.angle, distance_pct: area.dist } } : {}),
       ...payload,
     });
-    setQueued(n);
+    refreshPending(); // repaints the display with this ball predicted on top
     setExtraMode(null);
     setNbByes(null);
     setShotArea(null);
@@ -212,10 +240,9 @@ export default function ScorerConsolePage() {
   // round-trip. Only once the queue is empty (everything synced) does undo
   // fall back to the server's own last-ball undo.
   const undoLast = () => call(async () => {
-    const pendingCount = Outbox.pending(matchId).length;
-    if (pendingCount > 0) {
-      const left = Outbox.removeLast(matchId);
-      setQueued(left);
+    if (Outbox.pending(matchId).length > 0) {
+      Outbox.removeLast(matchId);
+      refreshPending();
       return;
     }
     await api(`/matches/${matchId}/balls/last`, { method: 'DELETE' });
@@ -242,9 +269,12 @@ export default function ScorerConsolePage() {
   // striker/bowler could be recovered). Treat that exactly like "openers not
   // set yet" instead of showing a run pad that will just error.
   const needsOpeners = (status === 'toss' || status === 'innings_break' || (status === 'live' && !state.engine)) && !followOn;
-  // Settings can be edited before the toss and between innings (backend allows
-  // scheduled/toss/innings_break); while open it replaces the current stage form.
-  const settingsVisible = ['scheduled', 'toss', 'innings_break'].includes(status) && settingsOpen;
+  // Settings can now be edited at any point until the match is decided — the
+  // backend accepts edits in every non-terminal state, and they take effect on
+  // the next ball. The panel opens as a modal so it works mid-innings without
+  // disturbing the run pad.
+  const canEditSettings = !['completed', 'abandoned', 'no_result', 'cancelled', 'forfeited'].includes(status);
+  const settingsPanelOpen = settingsOpen && canEditSettings;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -254,8 +284,18 @@ export default function ScorerConsolePage() {
           <h1 className="text-lg font-black">{match.team_a_short} vs {match.team_b_short} — Scorer</h1>
         </div>
         <div className="flex items-center gap-2">
-          {['scheduled', 'toss', 'innings_break'].includes(status) && (
-            <button className="btn-ghost text-xs" disabled={busy} onClick={() => setSettingsOpen(!settingsOpen)}>
+          {canEditSettings && xiConfirmed && (
+            <button className="btn-ghost text-xs" disabled={busy} onClick={() => setSquadEditOpen(true)}>
+              👥 Squad
+            </button>
+          )}
+          {['live', 'rain_delay'].includes(status) && (
+            <button className="btn-ghost text-xs" disabled={busy} onClick={() => setSquadChangeOpen(true)}>
+              🔄 Change
+            </button>
+          )}
+          {canEditSettings && (
+            <button className="btn-ghost text-xs" disabled={busy} onClick={() => setSettingsOpen(true)}>
               ⚙️ Settings
             </button>
           )}
@@ -263,7 +303,7 @@ export default function ScorerConsolePage() {
         </div>
       </div>
 
-      <ScoreHeader state={state} />
+      <ScoreHeader state={state} onSettings={canEditSettings ? () => setSettingsOpen(true) : undefined} />
       <ErrorBox error={error} />
       {queued > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gold/10 px-3 py-2 text-xs text-gold">
@@ -274,8 +314,8 @@ export default function ScorerConsolePage() {
           <div className="flex gap-2">
             {stuck && (
               <button className="btn-ghost !py-1 text-xs text-cherry" onClick={() => {
-                const left = Outbox.discardFirst(matchId);
-                setQueued(left);
+                Outbox.discardFirst(matchId);
+                refreshPending();
                 setStuck(false);
                 setSyncError(null);
                 void drainQueue();
@@ -288,7 +328,7 @@ export default function ScorerConsolePage() {
         </div>
       )}
 
-      {status === 'scheduled' && !xiConfirmed && !settingsVisible && (
+      {status === 'scheduled' && !xiConfirmed && (
         <PlayingXIForm
           match={match}
           teamA={teamA}
@@ -312,25 +352,63 @@ export default function ScorerConsolePage() {
         />
       )}
 
-      {settingsVisible && (
-        <SettingsForm
+      {settingsPanelOpen && (
+        <Modal title="Match settings" onClose={() => setSettingsOpen(false)}>
+          <SettingsForm
+            match={match}
+            state={state}
+            busy={busy}
+            onSave={(settings) =>
+              call(async () => {
+                await api(`/matches/${matchId}/settings`, { method: 'PATCH', body: settings });
+                // Reload the match (new squad size / rules) and squads in
+                // parallel; the modal closes on fresh data, never on pre-save
+                // values. Mid-innings, this simply re-reads rules the engine
+                // applies from the next ball.
+                await Promise.all([reloadMatch(), reloadSquads()]);
+                setSettingsOpen(false);
+              })
+            }
+          />
+        </Modal>
+      )}
+
+      {squadEditOpen && (
+        <SquadEditModal
           match={match}
+          teamA={teamA}
+          teamB={teamB}
+          squads={squads ?? []}
           busy={busy}
-          onSave={(settings) =>
+          onClose={() => setSquadEditOpen(false)}
+          onSave={(teamId, players) =>
             call(async () => {
-              await api(`/matches/${matchId}/settings`, { method: 'PATCH', body: settings });
-              // Settings are committed — reload what the Playing XI step reads
-              // before showing it again: the match carries the new squad size,
-              // the squads carry the roster/selection. Fetched in parallel so
-              // the panel closes on fresh data, never on the pre-save values.
-              await Promise.all([reloadMatch(), reloadSquads()]);
-              setSettingsOpen(false);
+              await api(`/matches/${matchId}/squads`, { method: 'PUT', body: { team_id: teamId, players } });
+              await reloadSquads();
             })
           }
         />
       )}
 
-      {status === 'scheduled' && xiConfirmed && !settingsVisible && (
+      {squadChangeOpen && (
+        <SquadChangeModal
+          match={match}
+          squads={squads ?? []}
+          busy={busy}
+          onClose={() => setSquadChangeOpen(false)}
+          onSubstitute={(teamId, outPlayerId, inPlayerId) =>
+            call(async () => {
+              await api(`/matches/${matchId}/substitutions`, {
+                method: 'POST',
+                body: { team_id: teamId, out_player_id: outPlayerId, in_player_id: inPlayerId },
+              });
+              await reloadSquads();
+            })
+          }
+        />
+      )}
+
+      {status === 'scheduled' && xiConfirmed && (
         <TossForm
           match={match}
           busy={busy}
@@ -353,7 +431,7 @@ export default function ScorerConsolePage() {
         />
       )}
 
-      {status === 'toss' && match.toss_winner_id && !settingsVisible && (
+      {status === 'toss' && match.toss_winner_id && (
         <div className="card space-y-3 p-4">
           <p className="text-center text-sm font-bold">
             {match.toss_winner_id === match.team_a_id ? match.team_a_short : match.team_b_short} won the toss and chose to {match.toss_decision}
@@ -368,7 +446,7 @@ export default function ScorerConsolePage() {
         </div>
       )}
 
-      {followOn && !settingsVisible && (
+      {followOn && (
         <div className="card space-y-3 p-4">
           <p className="text-sm font-bold text-gold">
             Follow-on available — lead of {followOn.lead} (deficit ≥ {followOn.deficit})
@@ -393,7 +471,7 @@ export default function ScorerConsolePage() {
         </div>
       )}
 
-      {needsOpeners && !settingsVisible && (
+      {needsOpeners && (
         <>
           {status === 'live' && (
             <div className="rounded-lg bg-gold/10 px-3 py-2 text-xs font-semibold text-gold">
@@ -565,7 +643,20 @@ export default function ScorerConsolePage() {
               .filter((p) => p.id !== state.pending_new_batter && !state.batters?.[p.id])
               .map((p) => (
                 <button key={p.id} className="btn-ghost w-full justify-start" disabled={busy}
-                  onClick={() => call(async () => { await api(`/matches/${matchId}/new-batter`, { method: 'POST', body: { player_id: p.id } }); })}>
+                  onClick={() => call(async () => {
+                    // The wicket that triggered this prompt may still be sitting
+                    // in the outbox (predicted, not yet synced). new-batter is a
+                    // direct server call, so flush the queue first — otherwise
+                    // the server has no fall-of-wicket to attach the batter to.
+                    if (Outbox.pending(matchId).length > 0) await drainQueue();
+                    const res = await api<{ state?: LiveState }>(
+                      `/matches/${matchId}/new-batter`, { method: 'POST', body: { player_id: p.id } });
+                    // Adopt the state the endpoint returns so the run pad comes
+                    // straight back with the new batter on strike — the very
+                    // next ball then scores offline (predicted on top of this),
+                    // no further server round-trip needed to keep going.
+                    if (res?.state) setServerState(res.state);
+                  })}>
                   {p.name}
                 </button>
               ))}
@@ -609,20 +700,32 @@ export default function ScorerConsolePage() {
 
 // ---------- pieces ----------
 
-function ScoreHeader({ state }: { state: LiveState }) {
+function ScoreHeader({ state, onSettings }: { state: LiveState; onSettings?: () => void }) {
   const s = state.summary;
   if (!s?.score) return null;
   const batters = Object.entries(state.batters ?? {}).filter(([, b]) => !b.out);
   return (
     <div className="card p-4">
-      <div className="flex items-end justify-between">
+      <div className="flex items-start justify-between">
         <div>
           <span className="text-xs font-bold uppercase text-mut">{s.batting_team}</span>
           <div className="score-digits text-3xl font-black">{s.score} <span className="text-base text-mut">({s.overs})</span></div>
         </div>
-        <div className="text-right text-xs text-mut">
-          {s.target != null && <div className="font-bold text-ink">Target {s.target}</div>}
-          <div>CRR {s.current_rr}{s.required_rr != null ? ` · RRR ${s.required_rr}` : ''}</div>
+        <div className="flex items-start gap-2">
+          <div className="text-right text-xs text-mut">
+            {s.target != null && <div className="font-bold text-ink">Target {s.target}</div>}
+            <div>CRR {s.current_rr}{s.required_rr != null ? ` · RRR ${s.required_rr}` : ''}</div>
+          </div>
+          {onSettings && (
+            <button
+              onClick={onSettings}
+              title="Match settings"
+              aria-label="Match settings"
+              className="rounded-lg p-1 text-lg text-mut transition-colors hover:bg-panel-2 hover:text-ink"
+            >
+              ⚙️
+            </button>
+          )}
         </div>
       </div>
       {batters.length > 0 && (
@@ -871,7 +974,7 @@ function WicketModal({ state, fieldingPool, battingPool, busy, onClose, onSubmit
     <Modal title="Wicket!" onClose={onClose}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
-          {['bowled', 'caught', 'caught_behind', 'lbw', 'run_out', 'stumped', 'hit_wicket', 'retired_hurt'].map((t) => (
+          {['bowled', 'caught', 'caught_behind', 'lbw', 'run_out', 'stumped', 'hit_wicket', 'retired_hurt', 'declared_out'].map((t) => (
             <button key={t} onClick={() => { setType(t); if (t !== 'run_out') setRunsBefore(0); }}
               className={`rounded-lg border px-2 py-2 text-xs font-bold ${type === t ? 'border-cherry bg-cherry/15 text-cherry' : 'border-line text-mut'}`}>
               {t.replace(/_/g, ' ')}
@@ -1101,8 +1204,91 @@ function CompletedPanel({ match, state, busy, battingPool, onFinalize, onSuperOv
   );
 }
 
-function SettingsForm({ match, busy, onSave }: {
-  match: MatchDetail; busy: boolean;
+/**
+ * Edit a team's playing XI at any point in the match. Each team is saved
+ * independently (the squads endpoint is per-team). The server refuses to drop
+ * a player who has already batted or bowled, so those edits surface an error
+ * rather than corrupting the live state.
+ */
+function SquadEditModal({ match, teamA, teamB, squads, busy, onClose, onSave }: {
+  match: MatchDetail; teamA: Team | null; teamB: Team | null;
+  squads: SquadPlayer[]; busy: boolean; onClose: () => void;
+  onSave: (teamId: string, players: Record<string, unknown>[]) => void;
+}) {
+  const teams = [
+    { id: match.team_a_id, label: match.team_a_short, roster: teamA?.squad ?? [] },
+    { id: match.team_b_id, label: match.team_b_short, roster: teamB?.squad ?? [] },
+  ];
+  const initialXi = (teamId: string) =>
+    new Set(squads.filter((s) => s.team_id === teamId && s.is_playing_xi).map((s) => s.player_id));
+  const [sel, setSel] = useState<Record<string, Set<string>>>({
+    [match.team_a_id]: initialXi(match.team_a_id),
+    [match.team_b_id]: initialXi(match.team_b_id),
+  });
+
+  const toggle = (teamId: string, playerId: string) => {
+    setSel((prev) => {
+      const next = new Set(prev[teamId]);
+      if (next.has(playerId)) next.delete(playerId); else next.add(playerId);
+      return { ...prev, [teamId]: next };
+    });
+  };
+
+  const save = (teamId: string, roster: SquadMember[]) => {
+    const chosen = sel[teamId];
+    const players = roster.map((p) => ({
+      player_id: p.id,
+      is_playing_xi: chosen.has(p.id),
+      is_twelfth: !chosen.has(p.id),
+      is_captain: p.is_captain,
+      is_wicket_keeper: p.is_wicket_keeper,
+    }));
+    onSave(teamId, players);
+  };
+
+  return (
+    <Modal title="Change squad" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-xs text-mut">
+          Tick the players in the XI. A player who has already batted or bowled can&apos;t be removed.
+        </p>
+        {teams.map((t) => (
+          <div key={t.id}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wide text-mut">{t.label}</span>
+              <span className="text-xs text-gold">{sel[t.id]?.size ?? 0} in XI</span>
+            </div>
+            {t.roster.length === 0 ? (
+              <p className="text-xs text-mut">No squad registered for this team.</p>
+            ) : (
+              <>
+                <div className="max-h-48 space-y-1 overflow-y-auto">
+                  {t.roster.map((p) => (
+                    <label key={p.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${
+                      sel[t.id]?.has(p.id) ? 'border-grass bg-grass/10' : 'border-line'}`}>
+                      <input type="checkbox" className="shrink-0" checked={sel[t.id]?.has(p.id) ?? false}
+                        onChange={() => toggle(t.id, p.id)} />
+                      <span className="flex-1">{p.full_name}</span>
+                      {p.is_captain && <span className="rounded bg-gold/15 px-1 text-[10px] font-bold text-gold">C</span>}
+                      {p.is_wicket_keeper && <span className="rounded bg-grass/15 px-1 text-[10px] font-bold text-grass">WK</span>}
+                    </label>
+                  ))}
+                </div>
+                <button className="btn-ghost mt-2 w-full !py-1 text-xs" disabled={busy}
+                  onClick={() => save(t.id, t.roster)}>
+                  Save {t.label} squad
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+function SettingsForm({ match, state, busy, onSave }: {
+  match: MatchDetail; state: LiveState; busy: boolean;
   onSave: (settings: Record<string, unknown>) => void;
 }) {
   const [overs, setOvers] = useState(match.rules_snapshot?.overs_per_innings?.toString() ?? '');
@@ -1111,12 +1297,19 @@ function SettingsForm({ match, busy, onSave }: {
   const [freeHit, setFreeHit] = useState((match.rules_snapshot?.no_ball as any)?.free_hit ?? false);
   const [dlsEnabled, setDlsEnabled] = useState((match.rules_snapshot?.dls as any)?.enabled ?? false);
 
+  // Calculate completed overs from live state
+  const ballsPerOver = (match.rules_snapshot as any)?.balls_per_over ?? 6;
+  const legalBalls = state?.engine?.legalBalls ?? 0;
+  const completedOvers = Math.floor(legalBalls / (ballsPerOver as number));
+  const oversNum = parseInt(overs, 10);
+  const oversInvalid = !isNaN(oversNum) && oversNum < completedOvers;
+
   return (
-    <div className="card space-y-4 p-4">
-      <h2 className="font-bold">Match Settings</h2>
+    <div className="space-y-4">
       <div>
         <label className="label text-xs">Overs per innings</label>
-        <input type="number" value={overs} onChange={(e) => setOvers(e.target.value)} className="input input-sm w-full" />
+        <input type="number" value={overs} onChange={(e) => setOvers(e.target.value)} className={`input input-sm w-full ${oversInvalid ? 'border-cherry' : ''}`} />
+        {oversInvalid && <p className="mt-1 text-xs text-cherry">Cannot reduce below {completedOvers} completed overs</p>}
       </div>
       <div>
         <label className="label text-xs">Players per side</label>
@@ -1134,9 +1327,8 @@ function SettingsForm({ match, busy, onSave }: {
         <input type="checkbox" checked={dlsEnabled} onChange={(e) => setDlsEnabled(e.target.checked)} className="checkbox checkbox-sm" />
         <span className="label-text text-xs">DLS enabled</span>
       </label>
-      <button className="btn-primary w-full" disabled={busy} onClick={() => {
+      <button className="btn-primary w-full" disabled={busy || oversInvalid} onClick={() => {
         const settings: Record<string, unknown> = {};
-        const oversNum = parseInt(overs, 10);
         const playersNum = parseInt(players, 10);
         const maxOversNum = parseInt(maxOversPerBowler, 10);
         if (!isNaN(oversNum)) settings.overs_per_innings = oversNum;
@@ -1147,5 +1339,62 @@ function SettingsForm({ match, busy, onSave }: {
         onSave(settings);
       }}>Save settings</button>
     </div>
+  );
+}
+
+function SquadChangeModal({ match, squads, busy, onClose, onSubstitute }: {
+  match: MatchDetail; squads: SquadPlayer[]; busy: boolean;
+  onClose: () => void;
+  onSubstitute: (teamId: string, outPlayerId: string, inPlayerId: string) => void;
+}) {
+  const [selectedTeam, setSelectedTeam] = useState(match.team_a_id);
+  const [outPlayer, setOutPlayer] = useState('');
+  const [inPlayer, setInPlayer] = useState('');
+
+  const teamSquads = squads.filter((s) => s.team_id === selectedTeam && (s.is_playing_xi || s.is_twelfth));
+  const benchPlayers = squads.filter(
+    (s) => s.team_id === selectedTeam && !s.is_playing_xi && !s.is_twelfth,
+  );
+  const isValid = selectedTeam && outPlayer && inPlayer && outPlayer !== inPlayer;
+
+  return (
+    <Modal title="Squad substitution" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="label text-xs">Team</label>
+          <select value={selectedTeam} onChange={(e) => { setSelectedTeam(e.target.value); setOutPlayer(''); setInPlayer(''); }} className="input input-sm w-full">
+            <option value={match.team_a_id}>{match.team_a_name}</option>
+            <option value={match.team_b_id}>{match.team_b_name}</option>
+          </select>
+        </div>
+        <div>
+          <label className="label text-xs">Player going out (XI or bench)</label>
+          <select value={outPlayer} onChange={(e) => setOutPlayer(e.target.value)} className="input input-sm w-full">
+            <option value="">Select…</option>
+            {teamSquads.map((s) => (
+              <option key={s.player_id} value={s.player_id}>
+                {s.full_name} {s.is_playing_xi ? '(XI)' : '(Bench)'}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label text-xs">Player coming in (bench only)</label>
+          <select value={inPlayer} onChange={(e) => setInPlayer(e.target.value)} className="input input-sm w-full">
+            <option value="">Select…</option>
+            {benchPlayers.map((s) => (
+              <option key={s.player_id} value={s.player_id}>{s.full_name}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          className="btn-primary w-full"
+          disabled={!isValid || busy}
+          onClick={() => onSubstitute(selectedTeam, outPlayer, inPlayer)}
+        >
+          Confirm substitution
+        </button>
+      </div>
+    </Modal>
   );
 }

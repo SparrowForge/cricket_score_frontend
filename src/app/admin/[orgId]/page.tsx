@@ -602,14 +602,17 @@ function TournamentsPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
       setName(''); setOvers(''); await reload();
     } catch (err) { setError(err as { message?: string }); }
   };
-  const generateFixtures = async (tid: string) => {
+  const generateFixtures = async (tid: string, numMatches: number = 0) => {
     setError(null);
     try {
       if (!venues?.length) throw new Error('Add a venue first (Venues tab)');
       setBusyMsg('Generating…');
+      // Calculate matchesPerDay from total numMatches and available days
+      const matchDays = [1, 2, 3, 4, 5, 6, 7];
+      const matchesPerDay = numMatches > 0 ? Math.ceil(numMatches / matchDays.length) : 4;
       const draft = await api<unknown[]>(`/tournaments/${tid}/fixtures/generate`, {
         method: 'POST',
-        body: { type: 'round_robin', startDate: new Date().toISOString().slice(0, 10), matchDays: [1, 2, 3, 4, 5, 6, 7], matchesPerDay: 4, venueIds: venues.map((v) => v.id) },
+        body: { type: 'round_robin', startDate: new Date().toISOString().slice(0, 10), matchDays, matchesPerDay, venueIds: venues.map((v) => v.id), maxMatches: numMatches || undefined },
       });
       const res = await api<{ created: number }>(`/tournaments/${tid}/fixtures/confirm`, { method: 'POST', body: { fixtures: draft } });
       setBusyMsg(`${res.created} fixtures scheduled ✓`); await reload();
@@ -666,7 +669,7 @@ function TournamentsPanel({ orgId, perms }: { orgId: string; perms: Perms }) {
               onMsg={(msg) => { setBusyMsg(msg); setTimeout(() => setBusyMsg(''), 1500); }}
               onError={(err) => setError(err)}
               onChanged={reload}
-              onGenerate={() => generateFixtures(t.id)} />
+              onGenerate={(numMatches) => generateFixtures(t.id, numMatches)} />
           )}
         </div>
       ))}
@@ -699,11 +702,12 @@ function TournamentSetup({ tournamentId, orgTeams, onMsg, onError, onChanged, on
   onMsg: (msg: string) => void;
   onError: (err: { message?: string } | null) => void;
   onChanged: () => Promise<unknown> | void;
-  onGenerate: () => void;
+  onGenerate: (numMatches: number) => void;
 }) {
   const { data: detail, reload } = useApi<{ teams: { id: string; name: string; short_name: string }[] }>(
     `/tournaments/${tournamentId}`,
   );
+  const [numMatches, setNumMatches] = useState('');
   const attached = detail?.teams ?? [];
   const unattached = orgTeams.filter((t) => !attached.some((a) => a.id === t.id));
 
@@ -740,12 +744,16 @@ function TournamentSetup({ tournamentId, orgTeams, onMsg, onError, onChanged, on
           </div>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <select className="input max-w-56" value="" onChange={(e) => e.target.value && attach(e.target.value)}>
           <option value="" disabled>Attach a team…</option>
           {unattached.map((tm) => <option key={tm.id} value={tm.id}>{tm.name}</option>)}
         </select>
-        <button type="button" className="btn-ghost text-xs" onClick={onGenerate}>⚡ Generate round-robin fixtures</button>
+        <div className="w-32">
+          <label className="label text-xs">Number of matches</label>
+          <input className="input" type="number" min={1} placeholder="Auto" value={numMatches} onChange={(e) => setNumMatches(e.target.value)} />
+        </div>
+        <button type="button" className="btn-ghost text-xs" onClick={() => onGenerate(numMatches ? Number(numMatches) : 0)}>⚡ Generate round-robin fixtures</button>
       </div>
     </div>
   );
@@ -781,6 +789,13 @@ function MatchesPanel({ orgId }: { orgId: string }) {
   const [dls, setDls] = useState(true);
   const [error, setError] = useState<{ message?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editMatch, setEditMatch] = useState<MatchListItem | null>(null);
+  const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [editFormatId, setEditFormatId] = useState('');
+  const [editOvers, setEditOvers] = useState('');
+  const [editMaxOversPerBowler, setEditMaxOversPerBowler] = useState('');
+  const [editPlayersPerSide, setEditPlayersPerSide] = useState('');
+  const [delMatch, setDelMatch] = useState<MatchListItem | null>(null);
 
   // Default the select to T20 once formats load, so the visible selection
   // always matches what will actually be submitted (an empty formatId with
@@ -793,6 +808,51 @@ function MatchesPanel({ orgId }: { orgId: string }) {
   }, [formatId, formats]);
 
   const selectedFormat = formats?.find((f) => f.id === formatId);
+
+  const openEditMatch = (m: MatchListItem) => {
+    setEditMatch(m);
+    const ruleOverrides = (m as any).rules_snapshot || {};
+    setEditScheduledAt(new Date(m.scheduled_start).toISOString().slice(0, 16));
+    setEditFormatId('');
+    setEditOvers(ruleOverrides.overs_per_innings?.toString() ?? '');
+    setEditMaxOversPerBowler(ruleOverrides.max_overs_per_bowler?.toString() ?? '');
+    setEditPlayersPerSide(ruleOverrides.players_per_side?.toString() ?? '');
+  };
+
+  const saveEditMatch = async () => {
+    if (!editMatch) return;
+    setBusy(true); setError(null);
+    try {
+      const rule_overrides: Record<string, unknown> = {};
+      if (editOvers) rule_overrides.overs_per_innings = Number(editOvers);
+      if (editMaxOversPerBowler) rule_overrides.max_overs_per_bowler = Number(editMaxOversPerBowler);
+      if (editPlayersPerSide) {
+        const n = Number(editPlayersPerSide);
+        rule_overrides.players_per_side = n;
+        rule_overrides.wickets_to_fall = n - 1;
+      }
+      await api(`/matches/${editMatch.id}`, {
+        method: 'PATCH',
+        body: {
+          scheduled_start: new Date(editScheduledAt).toISOString(),
+          ...(editFormatId ? { format_id: editFormatId } : {}),
+          ...(Object.keys(rule_overrides).length ? { rule_overrides } : {}),
+        },
+      });
+      setEditMatch(null); await reload();
+    } catch (err) { setError(err as { message?: string }); }
+    finally { setBusy(false); }
+  };
+
+  const deleteMatch = async () => {
+    if (!delMatch) return;
+    setBusy(true); setError(null);
+    try {
+      await api(`/matches/${delMatch.id}`, { method: 'DELETE' });
+      setDelMatch(null); await reload();
+    } catch (err) { setError(err as { message?: string }); }
+    finally { setBusy(false); }
+  };
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault(); setError(null); setBusy(true);
@@ -907,11 +967,59 @@ function MatchesPanel({ orgId }: { orgId: string }) {
               <span className="text-xs text-mut">{m.result_summary ?? new Date(m.scheduled_start).toLocaleString()}</span>
               <span className="ml-auto flex gap-2">
                 <Link href={`/matches/${m.id}`} className="btn-ghost !py-1 text-xs">View</Link>
+                {m.status === 'scheduled' && (
+                  <>
+                    <button onClick={() => openEditMatch(m)} className="btn-ghost !py-1 text-xs" disabled={busy}>Edit</button>
+                    <button onClick={() => { setError(null); setDelMatch(m); }} className="btn-danger !py-1 text-xs" disabled={busy}>Delete</button>
+                  </>
+                )}
                 <Link href={`/score/${m.id}`} className="btn-primary !py-1 text-xs">Score</Link>
               </span>
             </div>
           ))}
         </div>
+      )}
+
+      {editMatch && (
+        <Modal title="Edit match" onClose={() => setEditMatch(null)}>
+          <div className="space-y-3">
+            <div>
+              <label className="label text-xs">Scheduled start</label>
+              <input className="input input-sm w-full" type="datetime-local" value={editScheduledAt} onChange={(e) => setEditScheduledAt(e.target.value)} />
+            </div>
+            <div>
+              <label className="label text-xs">Format</label>
+              <select className="input input-sm w-full" value={editFormatId} onChange={(e) => setEditFormatId(e.target.value)}>
+                <option value="">Keep current</option>
+                {formats?.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label text-xs">Overs per innings</label>
+              <input className="input input-sm w-full" type="number" min={1} value={editOvers} onChange={(e) => setEditOvers(e.target.value)} />
+            </div>
+            <div>
+              <label className="label text-xs">Players per side</label>
+              <input className="input input-sm w-full" type="number" min={2} max={15} value={editPlayersPerSide} onChange={(e) => setEditPlayersPerSide(e.target.value)} />
+            </div>
+            <div>
+              <label className="label text-xs">Max overs per bowler</label>
+              <input className="input input-sm w-full" type="number" min={1} value={editMaxOversPerBowler} onChange={(e) => setEditMaxOversPerBowler(e.target.value)} />
+            </div>
+            <ErrorBox error={error} />
+            <div className="flex gap-2">
+              <button className="btn-primary flex-1" disabled={busy} onClick={saveEditMatch}>Save changes</button>
+              <button className="btn-ghost flex-1" disabled={busy} onClick={() => setEditMatch(null)}>Cancel</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {delMatch && (
+        <Confirm title={`Delete match: ${delMatch.team_a_short} vs ${delMatch.team_b_short}?`}
+          message="This cannot be undone. Any scoring data will be lost."
+          confirmLabel="Delete match" busy={busy} error={error}
+          onConfirm={deleteMatch} onClose={() => setDelMatch(null)} />
       )}
     </div>
   );
