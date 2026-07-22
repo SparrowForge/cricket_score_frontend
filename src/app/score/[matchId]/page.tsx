@@ -4,12 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api, uuid, ApiError } from '@/lib/api';
+import { Outbox } from '@/lib/outbox';
 import { useApi } from '@/lib/hooks';
 import { useAuth } from '@/lib/auth';
 import { useLiveMatch, LiveState } from '@/lib/useLive';
 import { MatchDetail, SquadPlayer, Team, oversFromBalls } from '@/lib/types';
 import { BallChip, ErrorBox, Modal, Spinner, StatusBadge } from '@/components/ui';
 import { DroppedCatchIcon, MisfieldIcon, RunOutMissedIcon } from '@/components/icons/fielding';
+
+// Retry an unsynced outbox in the background at this cadence. Short enough
+// that a ball reaches the server soon after connectivity returns, long enough
+// not to hammer a backend that's already struggling (e.g. cold-starting).
+const SYNC_RETRY_MS = 5000;
 
 type ExtraMode = null | 'wide' | 'no_ball' | 'bye' | 'leg_bye';
 // A no-ball can ALSO have byes/leg-byes run off it — the no-ball penalty
@@ -73,7 +79,7 @@ export default function ScorerConsolePage() {
   const { matchId } = useParams<{ matchId: string }>();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  const { state, setState } = useLiveMatch(matchId);
+  const { state } = useLiveMatch(matchId);
   const { data: match, reload: reloadMatch } = useApi<MatchDetail>(`/matches/${matchId}`, [state?.status]);
   const { data: squads, reload: reloadSquads } = useApi<SquadPlayer[]>(`/matches/${matchId}/squads`);
   const { data: teamA } = useApi<Team>(match ? `/teams/${match.team_a_id}` : null);
@@ -90,9 +96,49 @@ export default function ScorerConsolePage() {
   const [nextBowler, setNextBowler] = useState<string | null>(null);
   const [customRuns, setCustomRuns] = useState('');
 
+  // Offline-first ball queue (see lib/outbox.ts): `queued` mirrors what's
+  // sitting in localStorage for this match, `stuck` is true only when the
+  // server actively rejected the head-of-queue ball (a genuine rules
+  // conflict, not just "offline") and it needs the scorer's attention.
+  const [queued, setQueued] = useState(0);
+  const [stuck, setStuck] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const drainQueue = useCallback(async () => {
+    if (!matchId) return;
+    const result = await Outbox.drain(matchId);
+    setQueued(result.left);
+    setStuck(result.stuck);
+    setSyncError(result.errorMessage);
+  }, [matchId]);
+
   useEffect(() => {
     if (!authLoading && !user) router.push('/login');
   }, [authLoading, user, router]);
+
+  // Pick up anything left over from a previous session (crash, closed tab
+  // mid-sync) and try to flush it immediately.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!matchId) return;
+    const n = Outbox.pending(matchId).length;
+    setQueued(n);
+    if (n > 0) void drainQueue();
+  }, [matchId, drainQueue]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Background retry while anything is queued, plus an immediate attempt the
+  // moment the browser reports connectivity back.
+  useEffect(() => {
+    if (queued === 0) return;
+    const id = setInterval(() => { void drainQueue(); }, SYNC_RETRY_MS);
+    return () => clearInterval(id);
+  }, [queued, drainQueue]);
+
+  useEffect(() => {
+    const onOnline = () => void drainQueue();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [drainQueue]);
 
   // Full squad pool (XI + substitutes) — used for fielding selectors only.
   const fieldingPoolFor = useCallback((teamId: string | undefined): Pick[] => {
@@ -137,26 +183,43 @@ export default function ScorerConsolePage() {
     } finally { setBusy(false); }
   };
 
-  const postBall = (payload: Record<string, unknown>) =>
-    call(async () => {
-      const area = FIELD_REGIONS.find((r) => r.region === shotArea);
-      const res = await api<{ seq: number; state: LiveState }>(`/matches/${matchId}/balls`, {
-        method: 'POST',
-        body: {
-          client_event_id: uuid(),
-          expected_seq: state?.seq,
-          ...(nextBowler ? { bowler_id: nextBowler } : {}),
-          ...(area ? { wagon: { region: area.region, angle_deg: area.angle, distance_pct: area.dist } } : {}),
-          ...payload,
-        },
-      });
-      if (res.state) setState({ ...res.state, status: res.state.status ?? 'live', seq: res.seq } as LiveState);
-      setExtraMode(null);
-      setNbByes(null);
-      setShotArea(null);
-      setNextBowler(null);
-      setCustomRuns('');
+  // Local-first: every ball is written to the outbox (localStorage) and the
+  // form resets immediately — nothing here waits on the network, which is
+  // what made rapid tap-by-tap scoring feel slow against a cold/high-latency
+  // backend. A background drain (see the effects above) then pushes the
+  // queue to the server in order; the score display updates once the server
+  // applies it and pushes the state back over the websocket, same as it
+  // would for any other viewer watching this match.
+  const postBall = (payload: Record<string, unknown>) => {
+    const area = FIELD_REGIONS.find((r) => r.region === shotArea);
+    const n = Outbox.add(matchId, {
+      client_event_id: uuid(),
+      ...(nextBowler ? { bowler_id: nextBowler } : {}),
+      ...(area ? { wagon: { region: area.region, angle_deg: area.angle, distance_pct: area.dist } } : {}),
+      ...payload,
     });
+    setQueued(n);
+    setExtraMode(null);
+    setNbByes(null);
+    setShotArea(null);
+    setNextBowler(null);
+    setCustomRuns('');
+    void drainQueue();
+  };
+
+  // If anything is still queued, the most recent ball hasn't reached the
+  // server yet — dropping it from the outbox is instant and needs no network
+  // round-trip. Only once the queue is empty (everything synced) does undo
+  // fall back to the server's own last-ball undo.
+  const undoLast = () => call(async () => {
+    const pendingCount = Outbox.pending(matchId).length;
+    if (pendingCount > 0) {
+      const left = Outbox.removeLast(matchId);
+      setQueued(left);
+      return;
+    }
+    await api(`/matches/${matchId}/balls/last`, { method: 'DELETE' });
+  });
 
   const scoreRuns = (runs: number) => {
     if (extraMode === 'wide') return postBall({ extra_type: 'wide', runs_extras: runs });
@@ -202,6 +265,28 @@ export default function ScorerConsolePage() {
 
       <ScoreHeader state={state} />
       <ErrorBox error={error} />
+      {queued > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gold/10 px-3 py-2 text-xs text-gold">
+          <span>
+            ☁ {queued} ball{queued > 1 ? 's' : ''} queued{stuck ? ' — rejected' : ' — syncing…'}
+            {syncError && <span className="text-mut"> ({syncError})</span>}
+          </span>
+          <div className="flex gap-2">
+            {stuck && (
+              <button className="btn-ghost !py-1 text-xs text-cherry" onClick={() => {
+                const left = Outbox.discardFirst(matchId);
+                setQueued(left);
+                setStuck(false);
+                setSyncError(null);
+                void drainQueue();
+              }}>
+                Discard stuck ball
+              </button>
+            )}
+            <button className="btn-ghost !py-1 text-xs" onClick={() => void drainQueue()}>Sync now</button>
+          </div>
+        </div>
+      )}
 
       {status === 'scheduled' && !xiConfirmed && !settingsVisible && (
         <PlayingXIForm
@@ -447,9 +532,8 @@ export default function ScorerConsolePage() {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button className="btn-danger h-12 text-base" disabled={busy} onClick={() => setWicketOpen(true)}>WICKET</button>
-              <button className="btn-ghost h-12 text-base" disabled={busy}
-                onClick={() => call(async () => { await api(`/matches/${matchId}/balls/last`, { method: 'DELETE' }); })}>
-                ↩ Undo
+              <button className="btn-ghost h-12 text-base" disabled={busy} onClick={undoLast}>
+                ↩ Undo{queued > 0 ? ' (unsynced)' : ''}
               </button>
             </div>
           </div>
