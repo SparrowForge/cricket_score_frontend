@@ -75,6 +75,65 @@ const FIELD_REGIONS = [
 
 type FieldRegion = (typeof FIELD_REGIONS)[number]['region'];
 
+/**
+ * Round cricket-field picker for shot placement — a visual companion to the
+ * text chips. Every position is plotted from its region angle/distance using
+ * the SAME convention as the Stats wagon wheel (0° straight down the ground,
+ * clockwise, right-hand batter's off side to the right, `(angle − 90)`), so a
+ * dot here lands exactly where that shot shows up in the wagon wheel. Tapping a
+ * dot drives the same `selected` state the chips use, so the two stay in sync:
+ * pick "Long On" on the field and its chip lights up, and vice-versa.
+ */
+function FieldDiagram({ selected, onSelect }: {
+  selected: FieldRegion | null;
+  onSelect: (r: FieldRegion) => void;
+}) {
+  const pos = (angle: number, dist: number) => {
+    const rad = ((angle - 90) * Math.PI) / 180;
+    const d = (dist / 100) * 92;
+    return { x: 100 + Math.cos(rad) * d, y: 100 + Math.sin(rad) * d };
+  };
+  const sel = FIELD_REGIONS.find((r) => r.region === selected) ?? null;
+  const selPos = sel ? pos(sel.angle, sel.dist) : null;
+  return (
+    <svg viewBox="0 0 200 200" className="w-full select-none" style={{ touchAction: 'manipulation' }}>
+      {/* boundary + 30-yard ring + pitch — mirrors WagonWheelSvg */}
+      <circle cx="100" cy="100" r="96" fill="var(--color-grass)" fillOpacity="0.06" stroke="var(--color-line)" strokeWidth="1" />
+      <circle cx="100" cy="100" r="45" fill="var(--color-grass)" fillOpacity="0.10" stroke="var(--color-line)" strokeDasharray="3 3" strokeWidth="1" />
+      <rect x="97" y="85" width="6" height="30" rx="2" fill="var(--color-panel-2)" stroke="var(--color-line)" />
+      {/* side hints (right-hand batter) */}
+      <text x="197" y="103" textAnchor="end" fontSize="7" fill="var(--color-mut)">OFF</text>
+      <text x="3" y="103" textAnchor="start" fontSize="7" fill="var(--color-mut)">LEG</text>
+      {FIELD_REGIONS.map((r) => {
+        const { x, y } = pos(r.angle, r.dist);
+        const on = selected === r.region;
+        return (
+          <g key={r.region} onClick={() => onSelect(r.region)} style={{ cursor: 'pointer' }}>
+            {/* generous invisible hit target for touch */}
+            <circle cx={x} cy={y} r="7" fill="transparent" />
+            {on && <circle cx={x} cy={y} r="6" fill="var(--color-grass)" fillOpacity="0.25" />}
+            <circle cx={x} cy={y} r={on ? 3.6 : 2.4}
+              fill={on ? 'var(--color-grass)' : 'var(--color-mut)'} />
+          </g>
+        );
+      })}
+      {/* batter at the striker's end */}
+      <circle cx="100" cy="100" r="2" fill="var(--color-ink)" />
+      {/* label for the selected position — flipped below the dot near the top
+          edge, and anchored to the side near the left/right edge so long labels
+          (e.g. "Deep Square Leg") stay inside the viewBox instead of clipping */}
+      {sel && selPos && (
+        <text x={selPos.x < 40 ? 3 : selPos.x > 160 ? 197 : selPos.x}
+          y={selPos.y < 18 ? selPos.y + 12 : selPos.y - 8}
+          textAnchor={selPos.x < 40 ? 'start' : selPos.x > 160 ? 'end' : 'middle'}
+          fontSize="8" fontWeight="bold" fill="var(--color-grass)">
+          {sel.label}
+        </text>
+      )}
+    </svg>
+  );
+}
+
 
 export default function ScorerConsolePage() {
   const { matchId } = useParams<{ matchId: string }>();
@@ -597,15 +656,26 @@ export default function ScorerConsolePage() {
             <div className="mt-3 border-t border-line/40 pt-3">
               <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-mut">
                 Shot area <span className="font-normal normal-case">— optional, applies to the next ball</span>
+                {shotArea && (
+                  <span className="ml-1 font-semibold normal-case text-grass">
+                    · {FIELD_REGIONS.find((r) => r.region === shotArea)?.label}
+                  </span>
+                )}
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {FIELD_REGIONS.map((r) => (
-                  <button key={r.region} onClick={() => setShotArea(shotArea === r.region ? null : r.region)}
-                    className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
-                      shotArea === r.region ? 'border-grass bg-grass/15 text-grass' : 'border-line text-mut hover:text-ink'}`}>
-                    {r.label}
-                  </button>
-                ))}
+              <div className="flex gap-3">
+                <div className="w-[42%] max-w-[190px] shrink-0 self-start">
+                  <FieldDiagram selected={shotArea}
+                    onSelect={(r) => setShotArea(shotArea === r ? null : r)} />
+                </div>
+                <div className="flex flex-1 flex-wrap content-start gap-1.5">
+                  {FIELD_REGIONS.map((r) => (
+                    <button key={r.region} onClick={() => setShotArea(shotArea === r.region ? null : r.region)}
+                      className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                        shotArea === r.region ? 'border-grass bg-grass/15 text-grass' : 'border-line text-mut hover:text-ink'}`}>
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
